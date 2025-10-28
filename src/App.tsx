@@ -9,7 +9,15 @@ import type {
   MouseEvent as ReactMouseEvent,
   UIEvent as ReactUIEvent,
 } from 'react'
-import { RotateCw, Trash2, GitMerge, Undo2, Redo2, Eraser } from 'lucide-react'
+import {
+  RotateCw,
+  Trash2,
+  GitMerge,
+  Undo2,
+  Redo2,
+  Eraser,
+  GripHorizontal,
+} from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -1087,7 +1095,7 @@ function App() {
                   id="time-bar"
                   ref={timeBarRef}
                   className={cn(
-                    'absolute top-0 left-0 grid h-8 border-b border-gray-100'
+                    'absolute top-0 left-0 grid h-8 border-b border-gray-200'
                   )}
                   style={{
                     gridTemplateColumns: `repeat(${countDaysInclusive(dateRange.start, dateRange.end) + 1}, 100px)`,
@@ -1154,10 +1162,15 @@ function App() {
                       <div className="flex h-13 w-full items-center justify-center">
                         <div
                           className={cn(
-                            'h-13 w-13 rounded-md border-2 border-dashed'
+                            'flex h-13 w-16 flex-col justify-between rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs'
                           )}
                         >
-                          {/*{item.name}*/}
+                          <div className="flex justify-end select-none">
+                            {item.name}
+                          </div>
+                          <div className="flex cursor-move">
+                            <GripHorizontal size={20} />
+                          </div>
                         </div>
                       </div>
                       {preview.visible && preview.projectId === item.id && (
@@ -1182,7 +1195,7 @@ function App() {
                               handleScheduleDragStart(e, item.projectId, item)
                             }
                             className={cn(
-                              'absolute top-0 h-13 rounded-md border bg-white drop-shadow-xs',
+                              'absolute top-0 h-13 rounded-md border bg-white shadow-none drop-shadow-xs transition-all hover:shadow-md',
                               selected[item.scheduleId]
                                 ? 'z-20 border-blue-500 ring-2 ring-blue-500'
                                 : 'z-0 border-transparent',
