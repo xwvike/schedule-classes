@@ -16,7 +16,7 @@ import {
   Undo2,
   Redo2,
   Eraser,
-  GripHorizontal,
+  ListChecks,
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -26,6 +26,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import type { RootState } from '@/store/index'
 import { projects, teachers } from '@/mock'
@@ -35,7 +46,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from '@/store/editDataReducer'
-import { loadProjects } from '@/store/projectsReducer'
+import { loadProjects, setActiveProjectsByIds } from '@/store/projectsReducer'
 import { loadTeachers } from '@/store/teachersReducer'
 
 import {
@@ -1084,6 +1095,98 @@ function App() {
                       </TooltipTrigger>
                       <TooltipContent side="right">合并选中</TooltipContent>
                     </Tooltip>
+
+                    <Dialog>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <DialogTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                'inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-gray-100 disabled:opacity-50'
+                              )}
+                            >
+                              <ListChecks className="h-4 w-4" />
+                            </button>
+                          </DialogTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">选择科目</TooltipContent>
+                      </Tooltip>
+                      <DialogContent className="w-80">
+                        <DialogHeader>
+                          <DialogTitle>选择科目</DialogTitle>
+                        </DialogHeader>
+                        <form
+                          className="grid gap-4"
+                          onSubmit={(e) => {
+                            e.preventDefault()
+                            const fd = new FormData(e.currentTarget)
+                            const ids = new Set<string>(
+                              (fd.getAll('subject') as string[]) ?? []
+                            )
+                            const selectedList = projects.filter((p) =>
+                              ids.has(p.id)
+                            )
+                            if (selectedList.length === 0) {
+                              toast.error('请至少选择一个科目')
+                              return
+                            }
+                            dispatch(setActiveProjectsByIds(Array.from(ids)))
+                            toast.success('已更新科目')
+                          }}
+                        >
+                          <div className="grid grid-cols-2 gap-3">
+                            {projects.map((s) => {
+                              const hid = `hidden-${s.id}`
+                              const cid = `subject-${s.id}`
+                              const defaultChecked = !!projectData.find(
+                                (p) => p.id === s.id
+                              )
+                              return (
+                                <div
+                                  key={s.id}
+                                  className="flex items-center space-x-2"
+                                >
+                                  <Checkbox
+                                    id={cid}
+                                    defaultChecked={defaultChecked}
+                                    onCheckedChange={(
+                                      checked: boolean | 'indeterminate'
+                                    ) => {
+                                      const input = document.getElementById(
+                                        hid
+                                      ) as HTMLInputElement | null
+                                      if (input) input.checked = !!checked
+                                    }}
+                                  />
+                                  <Label htmlFor={cid} className="truncate">
+                                    {s.name}
+                                  </Label>
+                                  <input
+                                    id={hid}
+                                    className="hidden"
+                                    type="checkbox"
+                                    name="subject"
+                                    value={s.id}
+                                    defaultChecked={defaultChecked}
+                                  />
+                                </div>
+                              )
+                            })}
+                          </div>
+                          <DialogFooter>
+                            <DialogClose asChild>
+                              <Button type="button" variant="outline">
+                                取消
+                              </Button>
+                            </DialogClose>
+                            <DialogClose asChild>
+                              <Button type="submit">保存</Button>
+                            </DialogClose>
+                          </DialogFooter>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
                   </TooltipProvider>
                 </div>
               </div>
@@ -1159,18 +1262,13 @@ function App() {
                       onMouseMove={(e) => handleRowMouseMove(e, item.id)}
                       onMouseUp={(e) => handleRowMouseUp(e, item.id)}
                     >
-                      <div className="flex h-13 w-full items-center justify-center">
+                      <div className="sticky flex h-13 w-full items-center justify-center">
                         <div
                           className={cn(
                             'flex h-13 w-16 flex-col justify-between rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs'
                           )}
                         >
-                          <div className="flex justify-end select-none">
-                            {item.name}
-                          </div>
-                          <div className="flex cursor-move">
-                            <GripHorizontal size={20} />
-                          </div>
+                          <div className="flex select-none">{item.name}</div>
                         </div>
                       </div>
                       {preview.visible && preview.projectId === item.id && (
