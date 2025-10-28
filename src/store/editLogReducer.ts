@@ -59,7 +59,10 @@ export const editLogSlice = createSlice({
     },
     recordUpdate: (
       state,
-      action: PayloadAction<{ before: ScheduleSnapshot; after: ScheduleSnapshot }>
+      action: PayloadAction<{
+        before: ScheduleSnapshot
+        after: ScheduleSnapshot
+      }>
     ) => {
       const { before, after } = action.payload
       const entry: LogEntry = {
@@ -108,8 +111,15 @@ export const editLogSlice = createSlice({
   },
 })
 
-export const { addLogEntry, recordAdd, recordUpdate, recordDelete, undo, redo, cleanLog } =
-  editLogSlice.actions
+export const {
+  addLogEntry,
+  recordAdd,
+  recordUpdate,
+  recordDelete,
+  undo,
+  redo,
+  cleanLog,
+} = editLogSlice.actions
 
 // state-scoped selectors
 export const canUndo = (state: EditLogState): boolean => state.cursor > 0
