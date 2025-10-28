@@ -1262,10 +1262,10 @@ function App() {
                       onMouseMove={(e) => handleRowMouseMove(e, item.id)}
                       onMouseUp={(e) => handleRowMouseUp(e, item.id)}
                     >
-                      <div className="sticky flex h-13 w-full items-center justify-center">
+                      <div className="sticky top-0 left-0 z-30 flex h-13 w-full items-center justify-center">
                         <div
                           className={cn(
-                            'flex h-13 w-16 flex-col justify-between rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs'
+                            'flex h-13 w-16 flex-col justify-between rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs shadow-md'
                           )}
                         >
                           <div className="flex select-none">{item.name}</div>
