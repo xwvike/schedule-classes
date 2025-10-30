@@ -2,14 +2,47 @@ export const schools = [
   {
     value: '1',
     label: '测试校区',
+    classes: [
+      { id: '1', name: '基础课程A班' },
+      {
+        id: '2',
+        name: '基础课程B班',
+      },
+      {
+        id: '3',
+        name: '刷题强化班',
+      },
+    ],
   },
   {
     value: '2',
     label: '丰桥校区',
+    classes: [
+      { id: '5', name: '基础课程A班' },
+      {
+        id: '6',
+        name: '基础课程B班',
+      },
+      {
+        id: '7',
+        name: '刷题强化班',
+      },
+    ],
   },
   {
     value: '3',
     label: '测试校区3',
+    classes: [
+      { id: '8', name: '基础课程班' },
+      {
+        id: '10',
+        name: '刷题班',
+      },
+      {
+        id: '11',
+        name: '进阶课程班',
+      },
+    ],
   },
 ]
 

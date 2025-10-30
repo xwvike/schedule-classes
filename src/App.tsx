@@ -9,15 +9,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   UIEvent as ReactUIEvent,
 } from 'react'
-import {
-  RotateCw,
-  Trash2,
-  GitMerge,
-  Undo2,
-  Redo2,
-  Eraser,
-  ListChecks,
-} from 'lucide-react'
+import { RotateCw, Trash2, GitMerge, Undo2, Redo2, Eraser } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -26,27 +18,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import {
-  Dialog,
-  DialogContent,
-  DialogTrigger,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogClose,
-} from '@/components/ui/dialog'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import type { RootState } from '@/store/index'
-import { projects, teachers, schools } from '@/mock'
+import { teachers, schools } from '@/mock'
 import {
   addSchedule,
   addScheduleRaw,
   updateSchedule,
   deleteSchedule,
 } from '@/store/editDataReducer'
-import { loadProjects, setActiveProjectsByIds } from '@/store/projectsReducer'
+import { loadProjects } from '@/store/projectsReducer'
+import type { Project } from '@/store/projectsReducer'
 import { loadTeachers } from '@/store/teachersReducer'
 
 import {
@@ -62,6 +44,7 @@ interface DateRange {
   end: Date | null
 }
 
+type dateObj = { year: number; month: number; day: number }
 type ScheduleItem = {
   projectId: string
   scheduleId: string
@@ -95,6 +78,23 @@ function App() {
       start: new Date(now.getFullYear(), now.getMonth(), 1),
       end: new Date(now.getFullYear(), now.getMonth() + 1, 0),
     }
+  })
+  const [selRange, setSelRange] = useState<{
+    visible: boolean
+    startDate: Date | null
+    endDate: Date | null
+    projectId: string
+    projectTitle: string
+    left: number
+    width: number
+  }>({
+    visible: false,
+    startDate: null,
+    endDate: null,
+    projectId: '',
+    projectTitle: '',
+    left: 0,
+    width: 0,
   })
   const [days, setDays] = useState<
     Array<{ year: number; month: number; day: number }>
@@ -155,6 +155,24 @@ function App() {
     })
   }
 
+  const handleSelectSchool = (e: string[]) => {
+    if (e.length > 0) {
+      let projects: Project[] = []
+      e.forEach((schoolId) => {
+        const school = schools.find((s) => s.value === schoolId)
+        const classes = school?.classes.map((c) => {
+          return {
+            ...c,
+            schoolId: school.value,
+            schoolName: school.label,
+            description: '',
+          }
+        })
+        projects = projects.concat(classes || [])
+      })
+      dispatch(loadProjects(projects))
+    }
+  }
   const handleDeleteSelectedGlobal = () => {
     if (Object.keys(selected).length === 0) {
       toast.error('未选择任何课程', {
@@ -704,6 +722,56 @@ function App() {
     setResizing({ active: false, side: null })
   }
 
+  const handleSelStart = (date: dateObj, item: Project) => {
+    const startDate = new Date(date.year, date.month - 1, date.day)
+    setSelRange({
+      visible: true,
+      startDate,
+      endDate: startDate,
+      left: countDaysInclusive(dateRange.start, startDate) * 100,
+      width: countDaysInclusive(startDate, startDate) * 100,
+      projectId: item.id,
+      projectTitle: item.name,
+    })
+  }
+  const handleSelMove = (date: dateObj) => {
+    const endDate = new Date(date.year, date.month - 1, date.day)
+    const startDate = selRange.startDate!
+    const minDate = endDate > startDate ? startDate : endDate
+    const maxDate = endDate > startDate ? endDate : startDate
+    setSelRange({
+      ...selRange,
+      startDate,
+      endDate,
+      left: countDaysInclusive(dateRange.start, minDate) * 100,
+      width: countDaysInclusive(minDate, maxDate) * 100,
+    })
+  }
+  const handleSelEnd = () => {
+    const { startDate, endDate } = selRange
+    const minDate = startDate! < endDate! ? startDate : endDate
+    const maxDate = startDate! < endDate! ? endDate : startDate
+    dispatch(
+      addSchedule({
+        description: '',
+        startDate: new Date(minDate ?? '').getTime(),
+        endDate: new Date(maxDate ?? '').getTime(),
+        teacherId: '',
+        projectId: selRange.projectId!,
+        area: '',
+      })
+    )
+    setSelRange({
+      visible: false,
+      startDate: null,
+      endDate: null,
+      left: 0,
+      width: 0,
+      projectId: '',
+      projectTitle: '',
+    })
+  }
+
   useEffect(() => {
     measure()
     const ro = new ResizeObserver(() => measure())
@@ -713,7 +781,6 @@ function App() {
     window.addEventListener('resize', handle)
     window.addEventListener('orientationchange', handle)
     const id = setTimeout(measure, 0)
-    dispatch(loadProjects(projects))
     dispatch(loadTeachers(teachers))
     return () => {
       window.removeEventListener('resize', handle)
@@ -955,7 +1022,7 @@ function App() {
           <SchoolSelect
             allSchools={schools}
             defaultValue={[]}
-            onChange={(e) => console.log(e)}
+            onChange={handleSelectSchool}
           />
           <DateRangePicker
             value={dateRange}
@@ -1099,98 +1166,6 @@ function App() {
                       </TooltipTrigger>
                       <TooltipContent side="right">合并选中</TooltipContent>
                     </Tooltip>
-
-                    <Dialog>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <DialogTrigger asChild>
-                            <button
-                              type="button"
-                              className={cn(
-                                'inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-gray-100 disabled:opacity-50'
-                              )}
-                            >
-                              <ListChecks className="h-4 w-4" />
-                            </button>
-                          </DialogTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">选择科目</TooltipContent>
-                      </Tooltip>
-                      <DialogContent className="w-80">
-                        <DialogHeader>
-                          <DialogTitle>选择科目</DialogTitle>
-                        </DialogHeader>
-                        <form
-                          className="grid gap-4"
-                          onSubmit={(e) => {
-                            e.preventDefault()
-                            const fd = new FormData(e.currentTarget)
-                            const ids = new Set<string>(
-                              (fd.getAll('subject') as string[]) ?? []
-                            )
-                            const selectedList = projects.filter((p) =>
-                              ids.has(p.id)
-                            )
-                            if (selectedList.length === 0) {
-                              toast.error('请至少选择一个科目')
-                              return
-                            }
-                            dispatch(setActiveProjectsByIds(Array.from(ids)))
-                            toast.success('已更新科目')
-                          }}
-                        >
-                          <div className="grid grid-cols-2 gap-3">
-                            {projects.map((s) => {
-                              const hid = `hidden-${s.id}`
-                              const cid = `subject-${s.id}`
-                              const defaultChecked = !!projectData.find(
-                                (p) => p.id === s.id
-                              )
-                              return (
-                                <div
-                                  key={s.id}
-                                  className="flex items-center space-x-2"
-                                >
-                                  <Checkbox
-                                    id={cid}
-                                    defaultChecked={defaultChecked}
-                                    onCheckedChange={(
-                                      checked: boolean | 'indeterminate'
-                                    ) => {
-                                      const input = document.getElementById(
-                                        hid
-                                      ) as HTMLInputElement | null
-                                      if (input) input.checked = !!checked
-                                    }}
-                                  />
-                                  <Label htmlFor={cid} className="truncate">
-                                    {s.name}
-                                  </Label>
-                                  <input
-                                    id={hid}
-                                    className="hidden"
-                                    type="checkbox"
-                                    name="subject"
-                                    value={s.id}
-                                    defaultChecked={defaultChecked}
-                                  />
-                                </div>
-                              )
-                            })}
-                          </div>
-                          <DialogFooter>
-                            <DialogClose asChild>
-                              <Button type="button" variant="outline">
-                                取消
-                              </Button>
-                            </DialogClose>
-                            <DialogClose asChild>
-                              <Button type="submit">保存</Button>
-                            </DialogClose>
-                          </DialogFooter>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
                   </TooltipProvider>
                 </div>
               </div>
@@ -1252,7 +1227,7 @@ function App() {
                   {projectData.map((item) => (
                     <div
                       key={item.id}
-                      className="relative mt-4 grid h-13"
+                      className="relative mt-2 grid h-13"
                       style={{
                         width: `${(days.length + 1) * 100}px`,
                         gridTemplateColumns: `repeat(${days.length + 1}, 100px)`,
@@ -1269,12 +1244,49 @@ function App() {
                       <div className="sticky top-0 left-0 z-30 flex h-13 w-full items-center justify-center">
                         <div
                           className={cn(
-                            'flex h-13 w-16 flex-col justify-between rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs shadow-md'
+                            'flex h-13 w-22 flex-col rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs shadow-md'
                           )}
                         >
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="mb-1 w-18 flex-nowrap truncate text-xs text-gray-500">
+                                {item.schoolName}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{item.schoolName}</p>
+                            </TooltipContent>
+                          </Tooltip>
                           <div className="flex select-none">{item.name}</div>
                         </div>
                       </div>
+                      {getDaysInRange(dateRange.start, dateRange.end).map(
+                        (day, index) => (
+                          <div
+                            key={index}
+                            onMouseDownCapture={() => handleSelStart(day, item)}
+                            onMouseOverCapture={() => handleSelMove(day)}
+                            onMouseUpCapture={() => handleSelEnd()}
+                            className={cn(
+                              'h-full w-full cursor-cell',
+                              preview.visible
+                                ? ''
+                                : 'hover:rounded-md hover:border-2 hover:border-dashed hover:border-blue-400'
+                            )}
+                          ></div>
+                        )
+                      )}
+                      {selRange &&
+                        selRange.visible &&
+                        selRange.projectId === item.id && (
+                          <div
+                            className="pointer-events-none absolute top-0 z-30 h-13 rounded-md bg-white transition-all"
+                            style={{
+                              left: selRange.left + 'px',
+                              width: selRange.width + 'px',
+                            }}
+                          ></div>
+                        )}
                       {preview.visible && preview.projectId === item.id && (
                         <div
                           className="pointer-events-none absolute top-0 z-30 h-13 rounded-md border-2 border-dashed border-blue-400"
