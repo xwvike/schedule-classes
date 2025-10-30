@@ -5,6 +5,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -16,16 +17,41 @@ import {
 } from '@/components/ui/command'
 import { Check, ChevronsUpDown } from 'lucide-react'
 
-const frameworks = [
-  {
-    value: '1',
-    label: '测试校区',
-  },
-]
-
-function SchoolSelect() {
+type school = {
+  value: string
+  label: string
+}
+type schoolSelectProps = {
+  allSchools: school[]
+  defaultValue: string[]
+  onChange: (selectedSchools: string[]) => void
+}
+function SchoolSelect(props: schoolSelectProps) {
+  const { allSchools, defaultValue, onChange } = props
   const [open, setOpen] = useState(false)
-  const [value, setValue] = useState('')
+  const [values, setValues] = useState<string[]>(defaultValue)
+
+  const selectEvent = (id: string) => {
+    const nextValues = hasSelect(id)
+      ? values.filter((v) => v !== id)
+      : [...values, id]
+
+    setValues(nextValues)
+    onChange(nextValues)
+  }
+
+  const hasSelect = (id: string) => {
+    return values.includes(id)
+  }
+
+  const label = () => {
+    if (values.length <= 0) return '请选择校区'
+    if (values.length >= 1)
+      return (
+        allSchools.find((item) => item.value === values[0])?.label || '未知校区'
+      )
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -35,9 +61,18 @@ function SchoolSelect() {
           aria-expanded={open}
           className="w-[200px] justify-between"
         >
-          {value
-            ? frameworks.find((framework) => framework.value === value)?.label
-            : '选择校区...'}
+          <div className="flex items-center gap-2">
+            {label()}
+            {values.length > 1 && (
+              <Badge
+                className="h-5 min-w-5 rounded-full px-1 font-mono tabular-nums"
+                variant="outline"
+              >
+                +{values.length - 1}
+              </Badge>
+            )}
+          </div>
+
           <ChevronsUpDown className="opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -47,20 +82,19 @@ function SchoolSelect() {
           <CommandList>
             <CommandEmpty>No framework found.</CommandEmpty>
             <CommandGroup>
-              {frameworks.map((framework) => (
+              {allSchools.map((framework) => (
                 <CommandItem
                   key={framework.value}
                   value={framework.value}
                   onSelect={(currentValue) => {
-                    setValue(currentValue === value ? '' : currentValue)
-                    setOpen(false)
+                    selectEvent(currentValue)
                   }}
                 >
                   {framework.label}
                   <Check
                     className={cn(
                       'ml-auto',
-                      value === framework.value ? 'opacity-100' : 'opacity-0'
+                      hasSelect(framework.value) ? 'opacity-100' : 'opacity-0'
                     )}
                   />
                 </CommandItem>

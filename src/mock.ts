@@ -1,3 +1,18 @@
+export const schools = [
+  {
+    value: '1',
+    label: '测试校区',
+  },
+  {
+    value: '2',
+    label: '丰桥校区',
+  },
+  {
+    value: '3',
+    label: '测试校区3',
+  },
+]
+
 export const projects = [
   {
     id: '1',

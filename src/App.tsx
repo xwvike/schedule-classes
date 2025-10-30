@@ -39,7 +39,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import type { RootState } from '@/store/index'
-import { projects, teachers } from '@/mock'
+import { projects, teachers, schools } from '@/mock'
 import {
   addSchedule,
   addScheduleRaw,
@@ -952,7 +952,11 @@ function App() {
           ref={toolbarRef}
           className={cn('flex items-center gap-4 px-4 py-3')}
         >
-          <SchoolSelect />
+          <SchoolSelect
+            allSchools={schools}
+            defaultValue={[]}
+            onChange={(e) => console.log(e)}
+          />
           <DateRangePicker
             value={dateRange}
             onChange={(next) => {
