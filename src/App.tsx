@@ -11,7 +11,6 @@ import type {
   UIEvent as ReactUIEvent,
 } from 'react'
 import type { CheckedState } from '@radix-ui/react-checkbox'
-import { Input } from '@/components/ui/input'
 import {
   RotateCw,
   Trash2,
