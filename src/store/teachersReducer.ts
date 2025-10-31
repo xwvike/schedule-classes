@@ -6,7 +6,7 @@ interface Teacher {
   location: string
   phone: string
   id: string
-  subject: string
+  subject: string[]
 }
 
 const initialState = {

@@ -4,12 +4,24 @@ import DateRangePicker from './components/date-range-picker'
 import SchoolSelect from './components/school-select'
 import { Button } from '@/components/ui/button'
 import { useEffect, useRef, useState } from 'react'
+import dayjs from 'dayjs'
 import type {
   DragEvent,
   MouseEvent as ReactMouseEvent,
   UIEvent as ReactUIEvent,
 } from 'react'
-import { RotateCw, Trash2, GitMerge, Undo2, Redo2, Eraser } from 'lucide-react'
+import type { CheckedState } from '@radix-ui/react-checkbox'
+import { Input } from '@/components/ui/input'
+import {
+  RotateCw,
+  Trash2,
+  Undo2,
+  Redo2,
+  Eraser,
+  SquarePen,
+  User,
+  TableProperties,
+} from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
@@ -20,13 +32,26 @@ import {
 } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { RootState } from '@/store/index'
-import { teachers, schools } from '@/mock'
+import { teachers, schools, subjects } from '@/mock'
 import {
   addSchedule,
   addScheduleRaw,
   updateSchedule,
   deleteSchedule,
 } from '@/store/editDataReducer'
+import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Field,
+  FieldGroup,
+  FieldLabel,
+  FieldTitle,
+} from '@/components/ui/field'
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/hover-card'
 import { loadProjects } from '@/store/projectsReducer'
 import type { Project } from '@/store/projectsReducer'
 import { loadTeachers } from '@/store/teachersReducer'
@@ -51,6 +76,7 @@ type ScheduleItem = {
   startDate: number
   endDate: number
   description: string
+  subjectsId: string
   teacherId: string
   area: string
 }
@@ -63,6 +89,9 @@ type EditLogEntry = {
   before?: ScheduleItem
   after?: ScheduleItem
 }
+
+// Drag handlers extracted for reuse
+const COL_WIDTH = 100
 
 function App() {
   const contentRef = useRef<HTMLDivElement>(null)
@@ -112,6 +141,29 @@ function App() {
     left: number
     width: number
   }>({ visible: false, projectId: null, left: 0, width: 0 })
+  const [scheduleEdit, setScheduleEdit] = useState<{
+    visibleEntry: boolean
+    visibleEdit: boolean
+    scheduleId: string
+    subjectsId: string
+    teacherId: string
+    projectId: string
+    projectName: string
+    schoolName: string
+    startDate: string
+    endDate: string
+  }>({
+    visibleEntry: false,
+    visibleEdit: false,
+    scheduleId: '',
+    subjectsId: '',
+    teacherId: '',
+    projectId: '',
+    projectName: '',
+    schoolName: '',
+    startDate: '',
+    endDate: '',
+  })
   const [resizing, setResizing] = useState<{
     active: boolean
     side: 'left' | 'right' | null
@@ -137,11 +189,6 @@ function App() {
   const ignoreNextApplyCountRef = useRef(0)
 
   const [selected, setSelected] = useState<Record<string, string>>({})
-
-  const getProjectSelectedIds = (projectId: string) =>
-    Object.entries(selected)
-      .filter(([, pid]) => pid === projectId)
-      .map(([sid]) => sid)
 
   const toggleSelection = (projectId: string, scheduleId: string) => {
     setSelected((prev) => {
@@ -198,6 +245,7 @@ function App() {
               endDate: entry.endDate,
               description: entry.description,
               teacherId: entry.teacherId,
+              subjectsId: entry.subjectsId,
               area: entry.area,
               scheduleId: entry.scheduleId,
             })
@@ -208,120 +256,6 @@ function App() {
     }
     toast.success('删除成功', {
       description: `已删除 ${deletedCount} 条课程`,
-    })
-    setSelected({})
-  }
-  const handleMergeSelectedGlobal = () => {
-    const selectedIds = Object.keys(selected)
-    if (selectedIds.length < 2) {
-      toast.error('无法合并', {
-        description: '至少选择两条课程卡片',
-      })
-      return
-    }
-    const projectIds = new Set(Object.values(selected))
-    if (projectIds.size !== 1) {
-      toast.error('无法合并', {
-        description: '请选择同一项目行的课程卡片进行合并',
-      })
-      return
-    }
-    const projectId = Array.from(projectIds)[0] as string
-    const ids = getProjectSelectedIds(projectId)
-    const entries = (scheduleData[projectId] || []).filter((e) =>
-      ids.includes(e.scheduleId)
-    )
-    if (entries.length < 2) {
-      toast.error('无法合并', {
-        description: '至少选择两条课程卡片',
-      })
-      return
-    }
-    const sameTeacher = entries.every(
-      (e) => e.teacherId === entries[0].teacherId
-    )
-    if (!sameTeacher) {
-      toast.error('无法合并', {
-        description: '请选择同一位教师的课程进行合并',
-      })
-      return
-    }
-    const sorted = [...entries].sort((a, b) => a.startDate - b.startDate)
-    const contiguous = sorted.every((e, idx) => {
-      if (idx === 0) return true
-      const prev = sorted[idx - 1]
-      const prevEndDate = new Date(prev.endDate)
-      const nextStartDate = new Date(e.startDate)
-      const expectedNextStart = new Date(
-        prevEndDate.getFullYear(),
-        prevEndDate.getMonth(),
-        prevEndDate.getDate() + 1
-      )
-      const actualStart = new Date(
-        nextStartDate.getFullYear(),
-        nextStartDate.getMonth(),
-        nextStartDate.getDate()
-      )
-      return expectedNextStart.getTime() === actualStart.getTime()
-    })
-    if (!contiguous) {
-      toast.error('无法合并', {
-        description: '仅支持对日期连续的课程进行合并',
-      })
-      return
-    }
-    const first = sorted[0]
-    const last = sorted[sorted.length - 1]
-    {
-      const mergedStart = new Date(first.startDate)
-      const mergedEnd = new Date(last.endDate)
-      const others = (scheduleData[projectId] || []).filter(
-        (e) => !ids.includes(e.scheduleId)
-      )
-      const conflict = others.some(
-        (e) =>
-          !(
-            mergedEnd.getTime() < e.startDate ||
-            mergedStart.getTime() > e.endDate
-          )
-      )
-      if (conflict) {
-        toast.error('日期冲突', { description: '与该项目其他安排时间重叠' })
-        return
-      }
-      if (hasTeacherOverlap(first.teacherId, mergedStart, mergedEnd, ids)) {
-        toast.error('教师冲突', {
-          description: '该教师在这些日期已有其他项目安排',
-        })
-        return
-      }
-    }
-    dispatch(
-      updateSchedule({
-        projectId,
-        startDate: new Date(first.startDate),
-        endDate: new Date(last.endDate),
-        description: first.description,
-        teacherId: first.teacherId,
-        area: first.area,
-        scheduleId: first.scheduleId,
-      })
-    )
-    sorted.slice(1).forEach((entry) => {
-      dispatch(
-        deleteSchedule({
-          projectId,
-          startDate: entry.startDate,
-          endDate: entry.endDate,
-          description: entry.description,
-          teacherId: entry.teacherId,
-          area: entry.area,
-          scheduleId: entry.scheduleId,
-        })
-      )
-    })
-    toast.success('合并成功', {
-      description: `已合并 ${entries.length} 条课程`,
     })
     setSelected({})
   }
@@ -405,21 +339,6 @@ function App() {
       }
       rafRef.current = null
     })
-  }
-
-  // Drag handlers extracted for reuse
-  const COL_WIDTH = 100
-
-  const handleTeacherDragStart = (
-    e: DragEvent<HTMLDivElement>,
-    teacherId: string
-  ) => {
-    e.dataTransfer.setData(
-      'application/json',
-      JSON.stringify({ type: 'teacher', teacherId })
-    )
-    e.dataTransfer.effectAllowed = 'copy'
-    setDragMeta({ type: 'teacher', teacherId, durationDays: 1 })
   }
 
   const handleScheduleDragStart = (
@@ -515,6 +434,7 @@ function App() {
             endDate,
             teacherId: dragMeta.teacherId,
             projectId,
+            subjectsId: '',
             area: teacher?.location ?? '',
           })
         )
@@ -561,6 +481,7 @@ function App() {
             description: current.description,
             teacherId: current.teacherId,
             area: current.area,
+            subjectsId: current.subjectsId,
             scheduleId: current.scheduleId,
           })
         )
@@ -714,6 +635,7 @@ function App() {
           teacherId: current.teacherId,
           area: current.area,
           scheduleId: current.scheduleId,
+          subjectsId: current.subjectsId,
         })
       )
     }
@@ -757,6 +679,7 @@ function App() {
         startDate: new Date(minDate ?? '').getTime(),
         endDate: new Date(maxDate ?? '').getTime(),
         teacherId: '',
+        subjectsId: '',
         projectId: selRange.projectId!,
         area: '',
       })
@@ -770,6 +693,38 @@ function App() {
       projectId: '',
       projectTitle: '',
     })
+  }
+
+  const handleScheduleSubjects = (checked: CheckedState, id: string) => {
+    if (!scheduleEdit.visibleEdit) return
+    setScheduleEdit((prev) => ({
+      ...prev,
+      subjectsId: checked ? id : '',
+    }))
+    let schedule = scheduleData[scheduleEdit.projectId].find(
+      (item) => item.scheduleId === scheduleEdit.scheduleId
+    )
+    schedule = {
+      ...schedule!,
+      subjectsId: checked ? id : '',
+    }
+    dispatch(updateSchedule(schedule!))
+  }
+
+  const handleScheduleTeacher = (id: string) => {
+    if (!scheduleEdit.visibleEdit) return
+    setScheduleEdit((prev) => ({
+      ...prev,
+      teacherId: id,
+    }))
+    let schedule = scheduleData[scheduleEdit.projectId].find(
+      (item) => item.scheduleId === scheduleEdit.scheduleId
+    )
+    schedule = {
+      ...schedule!,
+      teacherId: id,
+    }
+    dispatch(updateSchedule(schedule!))
   }
 
   useEffect(() => {
@@ -912,6 +867,7 @@ function App() {
               description: a.description,
               teacherId: a.teacherId,
               area: a.area,
+              subjectsId: a.subjectsId,
               scheduleId: a.scheduleId,
             })
           )
@@ -927,6 +883,7 @@ function App() {
               description: b.description,
               teacherId: b.teacherId,
               area: b.area,
+              subjectsId: b.subjectsId,
               scheduleId: b.scheduleId,
             })
           )
@@ -942,6 +899,7 @@ function App() {
               description: b.description,
               teacherId: b.teacherId,
               area: b.area,
+              subjectsId: b.subjectsId,
               scheduleId: b.scheduleId,
             })
           )
@@ -959,6 +917,7 @@ function App() {
               startDate: a.startDate,
               endDate: a.endDate,
               description: a.description,
+              subjectsId: a.subjectsId,
               teacherId: a.teacherId,
               area: a.area,
               scheduleId: a.scheduleId,
@@ -974,6 +933,7 @@ function App() {
               startDate: new Date(b.startDate),
               endDate: new Date(b.endDate),
               description: b.description,
+              subjectsId: b.subjectsId,
               teacherId: b.teacherId,
               area: b.area,
               scheduleId: b.scheduleId,
@@ -990,6 +950,7 @@ function App() {
               endDate: new Date(a.endDate),
               description: a.description,
               teacherId: a.teacherId,
+              subjectsId: a.subjectsId,
               area: a.area,
               scheduleId: a.scheduleId,
             })
@@ -1053,31 +1014,124 @@ function App() {
           >
             <div
               className={cn(
-                'flex h-1/3 w-full flex-wrap gap-2 border-b border-gray-300 bg-gray-100 p-4'
+                'grid h-1/3 w-full grid-cols-2 overflow-hidden border-b border-gray-300 bg-gray-100'
               )}
             >
-              {teacherData.map((item) => (
+              <div className="relative overflow-auto border-r border-gray-300">
                 <div
-                  draggable="true"
-                  onDragStart={(e) => handleTeacherDragStart(e, item.id)}
-                  key={item.id}
                   className={cn(
-                    'flex h-fit w-fit cursor-move items-center gap-2 rounded-md bg-white p-2 drop-shadow'
+                    'sticky top-0 left-0 flex w-full items-center gap-2 overflow-hidden rounded-tl-md border-gray-300 bg-white/70 px-2 text-gray-700 backdrop-blur-md transition-all',
+                    scheduleEdit.visibleEdit
+                      ? 'h-10 border-b'
+                      : 'h-0 border-none'
                   )}
                 >
-                  <Avatar>
-                    <AvatarImage
-                      src={item.avatar || 'https://github.com/shadcn.png'}
-                      alt="@shadcn"
-                    />
-                    <AvatarFallback>{item.name.slice(0, 1)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex flex-col select-none">
-                    <div className="text-sm font-medium">{item.name}</div>
-                    <div className="text-xs text-gray-500">{item.phone}</div>
-                  </div>
+                  <TableProperties size={20} />
+                  {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排科目`}
                 </div>
-              ))}
+                <FieldGroup className="flex flex-row flex-wrap gap-2 p-2 [--radius:9999rem]">
+                  {subjects.map((option) => (
+                    <FieldLabel
+                      htmlFor={option.id}
+                      key={option.id}
+                      className="w-fit! bg-white"
+                    >
+                      <Field
+                        orientation="horizontal"
+                        className="cursor-pointer gap-1.5 overflow-hidden px-3! py-1.5! transition-all duration-100 ease-linear group-has-data-[state=checked]/field-label:px-2!"
+                      >
+                        <Checkbox
+                          value={option.id}
+                          id={option.id}
+                          onCheckedChange={(checked) =>
+                            handleScheduleSubjects(checked, option.id)
+                          }
+                          checked={scheduleEdit.subjectsId === option.id}
+                          className="-ml-6 -translate-x-1 rounded-full bg-white transition-all duration-100 ease-linear data-[state=checked]:ml-0 data-[state=checked]:translate-x-0"
+                        />
+                        <FieldTitle>{option.name}</FieldTitle>
+                      </Field>
+                    </FieldLabel>
+                  ))}
+                </FieldGroup>
+              </div>
+              <div className="relative overflow-auto">
+                <div
+                  className={cn(
+                    'sticky top-0 left-0 z-30 flex w-full items-center gap-2 overflow-hidden rounded-tr-md border-gray-300 bg-white/70 px-2 text-gray-700 backdrop-blur-md transition-all',
+                    scheduleEdit.visibleEdit
+                      ? 'h-10 border-b'
+                      : 'h-0 border-none'
+                  )}
+                >
+                  <User size={20} />
+                  {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排上课讲师`}
+                </div>
+
+                <div className="flex flex-wrap content-start items-start gap-2 p-2">
+                  {teacherData.map((item) => (
+                    <HoverCard>
+                      <HoverCardTrigger asChild>
+                        <div
+                          key={item.id}
+                          onClick={() => handleScheduleTeacher(item.id)}
+                          className={cn(
+                            'flex h-fit w-fit cursor-pointer items-center gap-2 rounded-full border-3 border-transparent bg-white px-2 py-1 drop-shadow',
+                            item.id === scheduleEdit.teacherId
+                              ? 'border-blue-500'
+                              : ''
+                          )}
+                        >
+                          <Avatar>
+                            <AvatarImage
+                              src={
+                                item.avatar || 'https://github.com/shadcn.png'
+                              }
+                              alt="@shadcn"
+                            />
+                            <AvatarFallback>
+                              {item.name.slice(0, 1)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex flex-col select-none">
+                            <div className="text-sm font-medium">
+                              {item.name}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {item.phone}
+                            </div>
+                          </div>
+                        </div>
+                      </HoverCardTrigger>
+                      <HoverCardContent className="w-auto">
+                        <div className="flex justify-between gap-4">
+                          <Avatar>
+                            <AvatarImage
+                              src={
+                                item.avatar || 'https://github.com/shadcn.png'
+                              }
+                              alt="@shadcn"
+                            />
+                            <AvatarFallback>
+                              {item.name.slice(0, 1)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-semibold">
+                              {item.name}
+                            </h4>
+                            <p className="text-sm">{item.location}</p>
+                            <p className="text-sm">{item.phone}</p>
+                            <div className="text-muted-foreground text-xs">
+                              {item.subject.join(', ')}
+                            </div>
+                          </div>
+                        </div>
+                      </HoverCardContent>
+                    </HoverCard>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className={cn('relative flex h-2/3 w-full overflow-hidden')}>
               <div id="tools" className={cn('w-16 shrink-0 border-r')}>
@@ -1151,21 +1205,6 @@ function App() {
                       </TooltipTrigger>
                       <TooltipContent side="right">删除选中</TooltipContent>
                     </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className={cn(
-                            'inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-gray-100 disabled:opacity-50'
-                          )}
-                          disabled={false}
-                          onClick={() => handleMergeSelectedGlobal()}
-                        >
-                          <GitMerge className="h-4 w-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">合并选中</TooltipContent>
-                    </Tooltip>
                   </TooltipProvider>
                 </div>
               </div>
@@ -1224,6 +1263,27 @@ function App() {
                   style={{ height: 'calc(100% - 2rem)' }}
                   onScroll={handleScheduleScroll}
                 >
+                  {scheduleEdit.visibleEdit && (
+                    <div
+                      onClickCapture={(e) => {
+                        e.stopPropagation()
+                        setSelected({})
+                        setScheduleEdit({
+                          visibleEdit: false,
+                          visibleEntry: false,
+                          subjectsId: '',
+                          teacherId: '',
+                          scheduleId: '',
+                          projectId: '',
+                          projectName: '',
+                          schoolName: '',
+                          startDate: '',
+                          endDate: '',
+                        })
+                      }}
+                      className="absolute top-0 right-0 bottom-0 left-0 z-10 bg-black opacity-30"
+                    ></div>
+                  )}
                   {projectData.map((item) => (
                     <div
                       key={item.id}
@@ -1297,24 +1357,31 @@ function App() {
                         ></div>
                       )}
                       {scheduleData[item.id] &&
-                        scheduleData[item.id].map((item) => (
+                        scheduleData[item.id].map((schedule) => (
                           <div
-                            key={item.scheduleId}
+                            key={schedule.scheduleId}
                             draggable="true"
                             onClick={(e) => {
                               e.stopPropagation()
-                              toggleSelection(item.projectId, item.scheduleId)
+                              toggleSelection(
+                                schedule.projectId,
+                                schedule.scheduleId
+                              )
                             }}
                             onDragStart={(e) =>
-                              handleScheduleDragStart(e, item.projectId, item)
+                              handleScheduleDragStart(
+                                e,
+                                schedule.projectId,
+                                schedule
+                              )
                             }
                             className={cn(
-                              'absolute top-0 h-13 rounded-md border bg-white shadow-none drop-shadow-xs transition-all hover:shadow-md',
-                              selected[item.scheduleId]
+                              'absolute top-0 h-13 overflow-hidden rounded-md border bg-white shadow-none drop-shadow-xs transition-all hover:shadow-md',
+                              selected[schedule.scheduleId]
                                 ? 'z-20 border-blue-500 ring-2 ring-blue-500'
                                 : 'z-0 border-transparent',
                               resizing.active &&
-                                resizing.scheduleId === item.scheduleId
+                                resizing.scheduleId === schedule.scheduleId
                                 ? 'opacity-60'
                                 : ''
                             )}
@@ -1322,56 +1389,103 @@ function App() {
                               left:
                                 countDaysInclusive(
                                   dateRange.start,
-                                  new Date(item.startDate)
+                                  new Date(schedule.startDate)
                                 ) *
                                   100 +
                                 'px',
                               width:
                                 countDaysInclusive(
-                                  new Date(item.startDate),
-                                  new Date(item.endDate)
+                                  new Date(schedule.startDate),
+                                  new Date(schedule.endDate)
                                 ) *
                                   100 +
                                 'px',
                             }}
                           >
-                            <div className="relative flex h-full w-full items-center gap-2 px-2">
+                            <div
+                              onMouseOver={() => {
+                                if (!scheduleEdit.visibleEdit) {
+                                  setScheduleEdit({
+                                    visibleEntry: true,
+                                    visibleEdit: false,
+                                    scheduleId: schedule.scheduleId,
+                                    subjectsId: '',
+                                    teacherId: '',
+                                    projectId: '',
+                                    projectName: '',
+                                    schoolName: '',
+                                    startDate: '',
+                                    endDate: '',
+                                  })
+                                }
+                              }}
+                              onMouseOut={() => {
+                                if (!scheduleEdit.visibleEdit) {
+                                  setScheduleEdit({
+                                    visibleEntry: false,
+                                    visibleEdit: false,
+                                    scheduleId: '',
+                                    subjectsId: '',
+                                    teacherId: '',
+                                    projectId: '',
+                                    projectName: '',
+                                    schoolName: '',
+                                    startDate: '',
+                                    endDate: '',
+                                  })
+                                }
+                              }}
+                              className="relative h-full w-full overflow-hidden"
+                            >
                               <div
                                 className="absolute top-0 left-0 h-full w-2 cursor-col-resize bg-transparent"
                                 onMouseDown={(e) =>
                                   handleResizeMouseDown(
                                     e,
                                     'left',
-                                    item.projectId,
-                                    item
+                                    schedule.projectId,
+                                    schedule
                                   )
                                 }
                               ></div>
-                              <Avatar>
-                                <AvatarImage
-                                  src={
-                                    findTeacher(item.teacherId)?.avatar ||
-                                    'https://github.com/shadcn.png'
-                                  }
-                                  alt="@shadcn"
-                                />
-                                <AvatarFallback>
-                                  {findTeacher(item.teacherId)?.name.slice(
-                                    0,
-                                    1
-                                  ) ?? ''}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="flex min-w-0 flex-col select-none">
-                                <div className="truncate text-sm font-medium">
-                                  {findTeacher(item.teacherId)?.name}
-                                </div>
-                                {countDaysInclusive(
-                                  new Date(item.startDate),
-                                  new Date(item.endDate)
-                                ) === 1 ? null : (
-                                  <div className="truncate text-xs text-gray-500">
-                                    {findTeacher(item.teacherId)?.phone}
+                              <div
+                                className={cn(
+                                  'pointer-events-none flex h-full w-full items-center gap-2 px-2'
+                                )}
+                              >
+                                {schedule.subjectsId && (
+                                  <Badge className="bg-blue-500 text-white dark:bg-blue-600">
+                                    {
+                                      subjects.find(
+                                        (subject) =>
+                                          subject.id === schedule.subjectsId
+                                      )?.name
+                                    }
+                                  </Badge>
+                                )}
+                                {schedule.teacherId && (
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-8 w-0 border-l"></div>
+                                    <Avatar>
+                                      <AvatarImage
+                                        src={
+                                          findTeacher(schedule.teacherId)
+                                            ?.avatar ||
+                                          'https://github.com/shadcn.png'
+                                        }
+                                        alt="@shadcn"
+                                      />
+                                      <AvatarFallback>
+                                        {findTeacher(
+                                          schedule.teacherId
+                                        )?.name.slice(0, 1) ?? ''}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <div className="flex min-w-0 flex-col select-none">
+                                      <div className="truncate text-sm font-medium">
+                                        {findTeacher(schedule.teacherId)?.name}
+                                      </div>
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -1381,11 +1495,47 @@ function App() {
                                   handleResizeMouseDown(
                                     e,
                                     'right',
-                                    item.projectId,
-                                    item
+                                    schedule.projectId,
+                                    schedule
                                   )
                                 }
                               ></div>
+                              {selected[schedule.scheduleId] &&
+                                scheduleEdit.visibleEntry &&
+                                scheduleEdit.scheduleId ===
+                                  schedule.scheduleId && (
+                                  <div
+                                    className={cn(
+                                      'absolute top-0 left-0 flex h-full w-full items-center justify-center bg-black/30'
+                                    )}
+                                  >
+                                    <Button
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setScheduleEdit({
+                                          visibleEntry: false,
+                                          visibleEdit: true,
+                                          scheduleId: schedule.scheduleId,
+                                          teacherId: schedule.teacherId,
+                                          subjectsId: schedule.subjectsId,
+                                          projectId: schedule.projectId,
+                                          projectName: item.name,
+                                          schoolName: item.schoolName,
+                                          startDate: dayjs(
+                                            schedule.startDate
+                                          ).format('MM-DD'),
+                                          endDate: dayjs(
+                                            schedule.endDate
+                                          ).format('MM-DD'),
+                                        })
+                                      }}
+                                      size="sm"
+                                    >
+                                      <SquarePen />
+                                      编辑
+                                    </Button>
+                                  </div>
+                                )}
                             </div>
                           </div>
                         ))}

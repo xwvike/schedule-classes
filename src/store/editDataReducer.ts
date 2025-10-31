@@ -6,6 +6,7 @@ interface baseEntry {
   endDate: Date | number
   description: string
   teacherId: string
+  subjectsId: string
   area: string
 }
 
@@ -45,6 +46,7 @@ const editDataSlice = createSlice({
             endDate: Number(new Date(payload.endDate)),
             description: payload.description,
             teacherId: payload.teacherId,
+            subjectsId: payload.subjectsId,
             area: payload.area,
             scheduleId,
           } as ScheduleItem,
@@ -95,6 +97,7 @@ const editDataSlice = createSlice({
             teacherId: payload.teacherId,
             area: payload.area,
             scheduleId: payload.scheduleId,
+            subjectsId: payload.subjectsId,
           } as ScheduleItem,
         }
       },

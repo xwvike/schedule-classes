@@ -46,7 +46,7 @@ export const schools = [
   },
 ]
 
-export const projects = [
+export const subjects = [
   {
     id: '1',
     name: '语文',
@@ -91,7 +91,7 @@ export const teachers = [
     location: '河南',
     phone: '19999999999',
     id: '1',
-    subject: '数学',
+    subject: ['数学'],
   },
   {
     avatar: '',
@@ -99,7 +99,7 @@ export const teachers = [
     location: '北京',
     phone: '18888888888',
     id: '2',
-    subject: '语文',
+    subject: ['语文', '数学'],
   },
   {
     avatar: '',
@@ -107,6 +107,46 @@ export const teachers = [
     location: '上海',
     phone: '17777777777',
     id: '3',
-    subject: '英语',
+    subject: ['英语', '物理'],
+  },
+  {
+    avatar: '',
+    name: '赵六',
+    location: '广州',
+    phone: '16666666666',
+    id: '4',
+    subject: ['化学', '生物', '历史'],
+  },
+  {
+    avatar: '',
+    name: '钱七',
+    location: '深圳',
+    phone: '15555555555',
+    id: '5',
+    subject: ['历史', '地理'],
+  },
+  {
+    avatar: '',
+    name: '孙八',
+    location: '杭州',
+    phone: '14444444444',
+    id: '6',
+    subject: ['历史', '地理', '生物'],
+  },
+  {
+    avatar: '',
+    name: '周九',
+    location: '成都',
+    phone: '13333333333',
+    id: '7',
+    subject: ['历史', '地理', '生物', '化学'],
+  },
+  {
+    avatar: '',
+    name: '吴十',
+    location: '重庆',
+    phone: '12222222222',
+    id: '8',
+    subject: ['政治'],
   },
 ]

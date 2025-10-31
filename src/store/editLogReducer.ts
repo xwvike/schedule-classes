@@ -6,6 +6,7 @@ interface ScheduleSnapshot {
   startDate: number
   endDate: number
   description: string
+  subjectsId: string
   teacherId: string
   area: string
 }
