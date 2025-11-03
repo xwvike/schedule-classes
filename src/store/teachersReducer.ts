@@ -1,6 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
-interface Teacher {
+export type Teacher = {
   avatar: string
   name: string
   location: string

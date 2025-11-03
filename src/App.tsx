@@ -3,6 +3,7 @@ import Header from './components/header'
 import DateRangePicker from './components/date-range-picker'
 import SchoolSelect from './components/school-select'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import type {
@@ -38,7 +39,14 @@ import {
   updateSchedule,
   deleteSchedule,
 } from '@/store/editDataReducer'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Field,
@@ -54,6 +62,7 @@ import {
 import { loadProjects } from '@/store/projectsReducer'
 import type { Project } from '@/store/projectsReducer'
 import { loadTeachers } from '@/store/teachersReducer'
+import type { Teacher } from '@/store/teachersReducer'
 
 import {
   addLogEntry,
@@ -187,7 +196,25 @@ function App() {
   const prevCursorRef = useRef(0)
   const ignoreNextApplyCountRef = useRef(0)
 
+  const [renderSubject, setRenderSubject] = useState(subjects)
   const [selected, setSelected] = useState<Record<string, string>>({})
+  const [teacherFilter, setTeacherFilter] = useState<'all' | 'subject'>(
+    'subject'
+  )
+  const [subjectSearch, setSubjectSearch] = useState<{
+    text: string
+    searched: boolean
+  }>({
+    text: '',
+    searched: false,
+  })
+  const [teacherSearch, setTeacherSearch] = useState<{
+    text: string
+    searched: boolean
+  }>({
+    text: '',
+    searched: false,
+  })
 
   const toggleSelection = (projectId: string, scheduleId: string) => {
     setSelected((prev) => {
@@ -726,6 +753,43 @@ function App() {
     dispatch(updateSchedule(schedule!))
   }
 
+  const handleSubjectSearch = () => {
+    if (subjectSearch.text && subjectSearch.searched) {
+      setRenderSubject(subjects)
+      setSubjectSearch({
+        text: '',
+        searched: false,
+      })
+    } else {
+      if (!subjectSearch.text) return
+      if (subjectSearch.text && !subjectSearch.searched) {
+        setRenderSubject(
+          subjects.filter((item) => item.name.includes(subjectSearch.text))
+        )
+        setSubjectSearch({
+          text: subjectSearch.text,
+          searched: true,
+        })
+      }
+    }
+  }
+
+  const handleTeacherSearch = () => {
+    if (teacherSearch.text && teacherSearch.searched) {
+      setTeacherSearch({
+        text: '',
+        searched: false,
+      })
+    } else {
+      if (!teacherSearch.text) return
+      if (teacherSearch.text && !teacherSearch.searched) {
+        setTeacherSearch({
+          text: teacherSearch.text,
+          searched: true,
+        })
+      }
+    }
+  }
   useEffect(() => {
     measure()
     const ro = new ResizeObserver(() => measure())
@@ -749,6 +813,26 @@ function App() {
       timeBarRef.current.style.transform = `translateX(${-scheduleClassesRef.current.scrollLeft}px)`
     }
   }, [days.length])
+
+  useEffect(() => {
+    const { subjectsId } = scheduleEdit
+    let _teachers: Teacher[] = []
+    if (subjectsId === '' || teacherFilter === 'all') {
+      _teachers = teachers
+    } else {
+      const subject = subjects.find((s) => s.id === subjectsId)
+      teachers.forEach((t: Teacher) => {
+        if (subject && t.subject.includes(subject.name)) {
+          _teachers.push(t)
+        }
+      })
+    }
+    if (teacherSearch.text && teacherSearch.searched) {
+      _teachers = _teachers.filter((t) => t.name.includes(teacherSearch.text))
+    }
+    dispatch(loadTeachers(_teachers))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleEdit, dispatch, teacherSearch.searched, teacherFilter])
 
   // 记录 editData 的变化到编辑日志（忽略撤销/重做导致的变化）
   useEffect(() => {
@@ -1013,7 +1097,7 @@ function App() {
           >
             <div
               className={cn(
-                'grid h-1/3 w-full grid-cols-2 overflow-hidden border-b border-gray-300 bg-gray-100'
+                'relative grid h-1/3 w-full grid-cols-2 overflow-hidden border-b border-gray-300 bg-gray-100'
               )}
             >
               <div className="relative overflow-auto border-r border-gray-300">
@@ -1029,7 +1113,7 @@ function App() {
                   {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排科目`}
                 </div>
                 <FieldGroup className="flex flex-row flex-wrap gap-2 p-2 [--radius:9999rem]">
-                  {subjects.map((option) => (
+                  {renderSubject.map((option) => (
                     <FieldLabel
                       htmlFor={option.id}
                       key={option.id}
@@ -1067,9 +1151,9 @@ function App() {
                   {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排上课讲师`}
                 </div>
 
-                <div className="flex flex-wrap content-start items-start gap-2 p-2">
+                <div className="flex flex-wrap content-start items-start gap-2 p-2 pb-20">
                   {teacherData.map((item) => (
-                    <HoverCard>
+                    <HoverCard key={item.id}>
                       <HoverCardTrigger asChild>
                         <div
                           key={item.id}
@@ -1130,6 +1214,86 @@ function App() {
                     </HoverCard>
                   ))}
                 </div>
+              </div>
+              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white/30 backdrop-blur-md">
+                <InputGroup>
+                  <InputGroupInput
+                    value={subjectSearch.text}
+                    placeholder="输入要搜索的科目"
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleSubjectSearch()
+                      }
+                    }}
+                    onInput={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setSubjectSearch({
+                        text: e.target.value,
+                        searched: false,
+                      })
+                    }
+                  />
+                  <InputGroupAddon
+                    align="inline-end"
+                    className="cursor-pointer"
+                    onClick={handleSubjectSearch}
+                  >
+                    <InputGroupButton
+                      className="cursor-pointer"
+                      variant="secondary"
+                    >
+                      {subjectSearch.text && subjectSearch.searched
+                        ? '清空'
+                        : '搜索'}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+              </div>
+              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white/30 backdrop-blur-md">
+                <div className="flex items-center justify-center space-x-2 pl-2">
+                  <Label className="mr-0 w-12" htmlFor="airplane-mode">
+                    按科目
+                  </Label>
+                  <Switch
+                    id="airplane-mode"
+                    checked={teacherFilter === 'all'}
+                    onCheckedChange={(checked) =>
+                      setTeacherFilter(checked ? 'all' : 'subject')
+                    }
+                  />
+                  <Label className="mr-0 w-14" htmlFor="airplane-mode">
+                    全部讲师
+                  </Label>
+                </div>
+                <div className="h-6 w-0 border-l"></div>
+                <InputGroup className="w-60">
+                  <InputGroupInput
+                    value={teacherSearch.text}
+                    placeholder="输入要搜索的讲师"
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleTeacherSearch()
+                      }
+                    }}
+                    onInput={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setTeacherSearch({
+                        text: e.target.value,
+                        searched: false,
+                      })
+                    }
+                  />
+                  <InputGroupAddon
+                    align="inline-end"
+                    onClick={handleTeacherSearch}
+                  >
+                    <InputGroupButton variant="secondary">
+                      {teacherSearch.text && teacherSearch.searched
+                        ? '清空'
+                        : '搜索'}
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
               </div>
             </div>
             <div className={cn('relative flex h-2/3 w-full overflow-hidden')}>
