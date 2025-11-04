@@ -114,7 +114,7 @@ const editDataSlice = createSlice({
       },
     },
     deleteSchedule: {
-      prepare: (payload: scheduleEntry) => ({
+      prepare: (payload: { projectId: string; scheduleId: string }) => ({
         payload: {
           projectId: payload.projectId,
           scheduleId: payload.scheduleId,

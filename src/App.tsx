@@ -267,12 +267,6 @@ function App() {
           dispatch(
             deleteSchedule({
               projectId: pid,
-              startDate: entry.startDate,
-              endDate: entry.endDate,
-              description: entry.description,
-              teacherId: entry.teacherId,
-              subjectsId: entry.subjectsId,
-              area: entry.area,
               scheduleId: entry.scheduleId,
             })
           )
@@ -441,37 +435,50 @@ function App() {
     if (colIndex < 1) colIndex = 1
     if (colIndex > maxStart) colIndex = maxStart
 
-    if (dragMeta.type === 'teacher' && dragMeta.teacherId) {
+    if (dragMeta.sourceProjectId !== projectId) {
+      const entries = scheduleData[dragMeta?.sourceProjectId ?? ''] || []
+      const old = entries.find((s) => s.scheduleId === dragMeta.scheduleId)
+      if (!old) return
       const startDate = new Date(dateRange.start)
       startDate.setDate(startDate.getDate() + (colIndex - 1))
+      console.log(dragMeta.durationDays)
       const endDate = new Date(startDate)
-      const teacher = findTeacher(dragMeta.teacherId)
+      endDate.setDate(startDate.getDate() + ((dragMeta.durationDays ?? 1) - 1))
+      console.log(startDate, endDate)
+      const teacher = findTeacher(old.teacherId)
       if (hasOverlap(projectId, startDate, endDate)) {
         toast.error('日期冲突', { description: '该项目在所选日期已有安排' })
-      } else if (hasTeacherOverlap(dragMeta.teacherId, startDate, endDate)) {
+      } else if (
+        hasTeacherOverlap(
+          old.teacherId,
+          startDate,
+          endDate,
+          dragMeta.scheduleId
+        )
+      ) {
         toast.error('教师冲突', {
           description: '该教师在所选日期已有其他项目安排',
         })
       } else {
         dispatch(
+          deleteSchedule({
+            projectId: dragMeta.sourceProjectId ?? '',
+            scheduleId: dragMeta.scheduleId ?? '',
+          })
+        )
+        dispatch(
           addSchedule({
             description: '',
             startDate,
             endDate,
-            teacherId: dragMeta.teacherId,
+            teacherId: old.teacherId,
             projectId,
-            subjectsId: '',
+            subjectsId: old.subjectsId,
             area: teacher?.location ?? '',
           })
         )
       }
-    } else if (dragMeta.type === 'schedule' && dragMeta.scheduleId) {
-      // Only adjust start date within the same project row
-      if (dragMeta.sourceProjectId !== projectId) {
-        setPreview({ visible: false, projectId: null, left: 0, width: 0 })
-        setDragMeta({ type: null })
-        return
-      }
+    } else {
       const entries = scheduleData[projectId] || []
       const current = entries.find((s) => s.scheduleId === dragMeta.scheduleId)
       if (!current) return
@@ -513,6 +520,7 @@ function App() {
         )
       }
     }
+
     setPreview({ visible: false, projectId: null, left: 0, width: 0 })
     setDragMeta({ type: null })
   }
@@ -945,12 +953,6 @@ function App() {
           dispatch(
             deleteSchedule({
               projectId: a.projectId,
-              startDate: new Date(a.startDate),
-              endDate: new Date(a.endDate),
-              description: a.description,
-              teacherId: a.teacherId,
-              area: a.area,
-              subjectsId: a.subjectsId,
               scheduleId: a.scheduleId,
             })
           )
@@ -1013,12 +1015,6 @@ function App() {
           dispatch(
             deleteSchedule({
               projectId: b.projectId,
-              startDate: new Date(b.startDate),
-              endDate: new Date(b.endDate),
-              description: b.description,
-              subjectsId: b.subjectsId,
-              teacherId: b.teacherId,
-              area: b.area,
               scheduleId: b.scheduleId,
             })
           )
