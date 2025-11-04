@@ -3,6 +3,20 @@ import Header from './components/header'
 import DateRangePicker from './components/date-range-picker'
 import SchoolSelect from './components/school-select'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuPortal,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
 import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
@@ -196,6 +210,7 @@ function App() {
   const prevCursorRef = useRef(0)
   const ignoreNextApplyCountRef = useRef(0)
 
+  const [midDate, setMidDate] = useState<dateObj | null>(null)
   const [renderSubject, setRenderSubject] = useState(subjects)
   const [selected, setSelected] = useState<Record<string, string>>({})
   const [teacherFilter, setTeacherFilter] = useState<'all' | 'subject'>(
@@ -798,6 +813,7 @@ function App() {
       }
     }
   }
+
   useEffect(() => {
     measure()
     const ro = new ResizeObserver(() => measure())
@@ -1040,6 +1056,104 @@ function App() {
     }
     prevCursorRef.current = editCursor
   }, [editCursor, editLog, dispatch])
+
+  const shiftSchedules = (
+    scope: 'before' | 'after',
+    direction: 'forward' | 'backward',
+    amount: number
+  ) => {
+    if (!midDate) {
+      toast.error('未获取锚点日期')
+      return
+    }
+    const anchor = new Date(midDate.year, midDate.month - 1, midDate.day)
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const delta = (direction === 'forward' ? amount : -amount) * DAY_MS
+    const dayStart = new Date(
+      anchor.getFullYear(),
+      anchor.getMonth(),
+      anchor.getDate()
+    ).getTime()
+
+    type MoveCandidate = {
+      item: ScheduleItem
+      newStart: number
+      newEnd: number
+    }
+    const candidates: MoveCandidate[] = []
+    const movedIds = new Set<string>()
+
+    projectData.forEach((proj) => {
+      const list = scheduleData[proj.id] || []
+      list.forEach((it) => {
+        const match =
+          scope === 'after' ? it.startDate >= dayStart : it.endDate < dayStart
+        if (match) {
+          const newStart = it.startDate + delta
+          const newEnd = it.endDate + delta
+          candidates.push({ item: it, newStart, newEnd })
+          movedIds.add(it.scheduleId)
+        }
+      })
+    })
+
+    if (candidates.length === 0) {
+      toast('无可调整的安排', {
+        description: '所选范围内没有可调整的课程',
+      })
+      return
+    }
+
+    const excludeIds = Array.from(movedIds)
+    for (const { item, newStart, newEnd } of candidates) {
+      const others = (scheduleData[item.projectId] || []).filter(
+        (e) => !movedIds.has(e.scheduleId)
+      )
+      const conflictProject = others.some(
+        (e) => !(newEnd < e.startDate || newStart > e.endDate)
+      )
+      if (conflictProject) {
+        toast.error('调整冲突', {
+          description: '存在项目内日期冲突，已取消批量移动',
+        })
+        return
+      }
+
+      if (
+        item.teacherId &&
+        hasTeacherOverlap(
+          item.teacherId,
+          new Date(newStart),
+          new Date(newEnd),
+          excludeIds
+        )
+      ) {
+        toast.error('调整冲突', {
+          description: '存在讲师日程冲突，已取消批量移动',
+        })
+        return
+      }
+    }
+
+    candidates.forEach(({ item, newStart, newEnd }) => {
+      dispatch(
+        updateSchedule({
+          projectId: item.projectId,
+          startDate: new Date(newStart),
+          endDate: new Date(newEnd),
+          description: item.description,
+          teacherId: item.teacherId,
+          area: item.area,
+          subjectsId: item.subjectsId,
+          scheduleId: item.scheduleId,
+        })
+      )
+    })
+
+    toast.success('批量调整完成', {
+      description: `已调整 ${candidates.length} 条安排`,
+    })
+  }
 
   return (
     <div
@@ -1385,34 +1499,90 @@ function App() {
                     length:
                       countDaysInclusive(dateRange.start, dateRange.end) + 1,
                   }).map((_, index) => (
-                    <div
-                      key={index}
-                      className={cn(
-                        'box-border flex items-end pl-2 text-xs text-gray-400',
-                        index > 0 ? 'border-l' : ''
-                      )}
+                    <DropdownMenu
+                      onOpenChange={(e) => {
+                        if (e) setMidDate(days[index - 1])
+                        else setMidDate(null)
+                      }}
                     >
-                      {index > 0 && days.length > 0 && (
-                        <div className="flex flex-col leading-tight">
-                          <span>
+                      <DropdownMenuTrigger asChild>
+                        <div
+                          key={index}
+                          className={cn(
+                            'box-border flex cursor-pointer items-end pl-2 text-xs text-gray-400 transition-all hover:text-black',
+                            index > 0 ? 'border-l' : ''
+                          )}
+                        >
+                          {index > 0 && days.length > 0 && (
+                            <div className="flex flex-col leading-tight">
+                              <span>
+                                {days[index - 1]?.month +
+                                  '月' +
+                                  days[index - 1]?.day +
+                                  '日'}
+                              </span>
+                              <span className="text-[10px]">
+                                {'周' +
+                                  '日一二三四五六'[
+                                    new Date(
+                                      days[index - 1].year,
+                                      days[index - 1].month - 1,
+                                      days[index - 1].day
+                                    ).getDay()
+                                  ]}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-56" align="start">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel>
                             {days[index - 1]?.month +
                               '月' +
                               days[index - 1]?.day +
                               '日'}
-                          </span>
-                          <span className="text-[10px] text-gray-400">
-                            {'周' +
-                              '日一二三四五六'[
-                                new Date(
-                                  days[index - 1].year,
-                                  days[index - 1].month - 1,
-                                  days[index - 1].day
-                                ).getDay()
-                              ]}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                            之后课程安排
+                          </DropdownMenuLabel>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              shiftSchedules('after', 'forward', 1)
+                            }}
+                          >
+                            向后调整1天
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              shiftSchedules('after', 'backward', 1)
+                            }}
+                          >
+                            向前调整1天
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel>
+                            {days[index - 1]?.month +
+                              '月' +
+                              days[index - 1]?.day +
+                              '日'}
+                            之前课程安排
+                          </DropdownMenuLabel>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              shiftSchedules('before', 'forward', 1)
+                            }}
+                          >
+                            向后调整1天
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              shiftSchedules('before', 'backward', 1)
+                            }}
+                          >
+                            向前调整1天
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   ))}
                 </div>
                 <div
