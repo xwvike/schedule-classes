@@ -9,12 +9,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuPortal,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Switch } from '@/components/ui/switch'
@@ -27,7 +22,6 @@ import type {
 } from 'react'
 import type { CheckedState } from '@radix-ui/react-checkbox'
 import {
-  RotateCw,
   Trash2,
   Undo2,
   Redo2,
@@ -294,7 +288,7 @@ function App() {
     })
     setSelected({})
   }
-  const findTeacher = (id: string) => teacherData.find((t) => t.id === id)
+  const findTeacher = (id: string) => teachers.find((t) => t.id === id)
   const hasOverlap = (
     projectId: string,
     start: Date,
@@ -1079,6 +1073,8 @@ function App() {
       item: ScheduleItem
       newStart: number
       newEnd: number
+      conflictProject?: boolean
+      conflictTeacher?: boolean
     }
     const candidates: MoveCandidate[] = []
     const movedIds = new Set<string>()
@@ -1087,7 +1083,7 @@ function App() {
       const list = scheduleData[proj.id] || []
       list.forEach((it) => {
         const match =
-          scope === 'after' ? it.startDate >= dayStart : it.endDate < dayStart
+          scope === 'after' ? it.startDate >= dayStart : it.startDate < dayStart
         if (match) {
           const newStart = it.startDate + delta
           const newEnd = it.endDate + delta
@@ -1105,37 +1101,152 @@ function App() {
     }
 
     const excludeIds = Array.from(movedIds)
-    for (const { item, newStart, newEnd } of candidates) {
+    const feasible: MoveCandidate[] = []
+    const conflicts: MoveCandidate[] = []
+
+    for (const c of candidates) {
+      const { item, newStart, newEnd } = c
       const others = (scheduleData[item.projectId] || []).filter(
         (e) => !movedIds.has(e.scheduleId)
       )
       const conflictProject = others.some(
         (e) => !(newEnd < e.startDate || newStart > e.endDate)
       )
-      if (conflictProject) {
-        toast.error('调整冲突', {
-          description: '存在项目内日期冲突，已取消批量移动',
-        })
-        return
-      }
-
-      if (
-        item.teacherId &&
+      const conflictTeacher =
+        !!item.teacherId &&
         hasTeacherOverlap(
           item.teacherId,
           new Date(newStart),
           new Date(newEnd),
           excludeIds
         )
-      ) {
-        toast.error('调整冲突', {
-          description: '存在讲师日程冲突，已取消批量移动',
+
+      if (conflictProject || conflictTeacher) {
+        conflicts.push({ ...c, conflictProject, conflictTeacher })
+      } else {
+        feasible.push(c)
+      }
+    }
+    {
+      const byProject = new Map<string, MoveCandidate[]>()
+      feasible.forEach((c) => {
+        const key = c.item.projectId
+        const arr = byProject.get(key) || []
+        arr.push(c)
+        byProject.set(key, arr)
+      })
+      const conflictIds = new Set<string>()
+      byProject.forEach((list) => {
+        list.sort((a, b) => a.newStart - b.newStart)
+        for (let i = 1; i < list.length; i++) {
+          const prev = list[i - 1]
+          const cur = list[i]
+          if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
+            conflictIds.add(prev.item.scheduleId)
+            conflictIds.add(cur.item.scheduleId)
+          }
+        }
+      })
+      const byTeacher = new Map<string, MoveCandidate[]>()
+      feasible.forEach((c) => {
+        const t = c.item.teacherId
+        if (!t) return
+        const arr = byTeacher.get(t) || []
+        arr.push(c)
+        byTeacher.set(t, arr)
+      })
+      byTeacher.forEach((list) => {
+        list.sort((a, b) => a.newStart - b.newStart)
+        for (let i = 1; i < list.length; i++) {
+          const prev = list[i - 1]
+          const cur = list[i]
+          if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
+            conflictIds.add(prev.item.scheduleId)
+            conflictIds.add(cur.item.scheduleId)
+          }
+        }
+      })
+      if (conflictIds.size > 0) {
+        const stillFeasible: MoveCandidate[] = []
+        const newlyConflicted: MoveCandidate[] = []
+        feasible.forEach((c) => {
+          if (conflictIds.has(c.item.scheduleId)) {
+            newlyConflicted.push({ ...c, conflictProject: true })
+          } else {
+            stillFeasible.push(c)
+          }
         })
-        return
+        feasible.length = 0
+        feasible.push(...stillFeasible)
+        conflicts.push(...newlyConflicted)
+      }
+      const conflictsByProject = new Map<
+        string,
+        { start: number; end: number }[]
+      >()
+      conflicts.forEach((c) => {
+        const key = c.item.projectId
+        const arr = conflictsByProject.get(key) || []
+        arr.push({ start: c.item.startDate, end: c.item.endDate })
+        conflictsByProject.set(key, arr)
+      })
+      const conflictsByTeacher = new Map<
+        string,
+        { start: number; end: number }[]
+      >()
+      conflicts.forEach((c) => {
+        const t = c.item.teacherId
+        if (!t) return
+        const arr = conflictsByTeacher.get(t) || []
+        arr.push({ start: c.item.startDate, end: c.item.endDate })
+        conflictsByTeacher.set(t, arr)
+      })
+
+      const conflictIds2 = new Set<string>()
+      feasible.forEach((c) => {
+        const projRanges = conflictsByProject.get(c.item.projectId) || []
+        if (
+          projRanges.some((e) => !(c.newEnd < e.start || c.newStart > e.end))
+        ) {
+          conflictIds2.add(c.item.scheduleId)
+          return
+        }
+        const t = c.item.teacherId
+        if (t) {
+          const teacherRanges = conflictsByTeacher.get(t) || []
+          if (
+            teacherRanges.some(
+              (e) => !(c.newEnd < e.start || c.newStart > e.end)
+            )
+          ) {
+            conflictIds2.add(c.item.scheduleId)
+          }
+        }
+      })
+      if (conflictIds2.size > 0) {
+        const stillFeasible: MoveCandidate[] = []
+        const newlyConflicted: MoveCandidate[] = []
+        feasible.forEach((c) => {
+          if (conflictIds2.has(c.item.scheduleId)) {
+            newlyConflicted.push({ ...c, conflictProject: true })
+          } else {
+            stillFeasible.push(c)
+          }
+        })
+        feasible.length = 0
+        feasible.push(...stillFeasible)
+        conflicts.push(...newlyConflicted)
       }
     }
 
-    candidates.forEach(({ item, newStart, newEnd }) => {
+    if (conflicts.length > 0) {
+      toast.error('存在冲突安排', {
+        description: `请检查冲突安排`,
+      })
+      return
+    }
+
+    feasible.forEach(({ item, newStart, newEnd }) => {
       dispatch(
         updateSchedule({
           projectId: item.projectId,
@@ -1151,7 +1262,7 @@ function App() {
     })
 
     toast.success('批量调整完成', {
-      description: `已调整 ${candidates.length} 条安排`,
+      description: `已调整 ${feasible.length} 条安排`,
     })
   }
 
@@ -1188,10 +1299,10 @@ function App() {
               })
             }}
           />
-          <Button variant="outline" className="cursor-pointer">
+          {/*<Button variant="outline" className="cursor-pointer">
             <RotateCw />
             初始化编辑器
-          </Button>
+          </Button>*/}
 
           <div className="flex-1"></div>
         </div>
@@ -1325,7 +1436,7 @@ function App() {
                   ))}
                 </div>
               </div>
-              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white/30 backdrop-blur-md">
+              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white/70 backdrop-blur-md">
                 <InputGroup>
                   <InputGroupInput
                     value={subjectSearch.text}
@@ -1359,7 +1470,7 @@ function App() {
                   </InputGroupAddon>
                 </InputGroup>
               </div>
-              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white/30 backdrop-blur-md">
+              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white/70 backdrop-blur-md">
                 <div className="flex items-center justify-center space-x-2 pl-2">
                   <Label className="mr-0 w-12" htmlFor="airplane-mode">
                     按科目
@@ -1500,6 +1611,7 @@ function App() {
                       countDaysInclusive(dateRange.start, dateRange.end) + 1,
                   }).map((_, index) => (
                     <DropdownMenu
+                      key={index}
                       onOpenChange={(e) => {
                         if (e) setMidDate(days[index - 1])
                         else setMidDate(null)
