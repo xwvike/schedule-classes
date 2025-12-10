@@ -1,7 +1,14 @@
-import { cn, countDaysInclusive, getDaysInRange } from '@/lib/utils'
+import {
+  cn,
+  countDaysInclusive,
+  getDaysInRange,
+  randomString,
+} from '@/lib/utils'
 import Header from './components/header'
+import ScrollText from './components/scroll-text'
 import DateRangePicker from './components/date-range-picker'
 import SchoolSelect from './components/school-select'
+import type { school } from './components/school-select'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,6 +19,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useEffect, useRef, useState } from 'react'
 import dayjs from 'dayjs'
@@ -29,6 +45,8 @@ import {
   SquarePen,
   User,
   TableProperties,
+  ChartNoAxesGantt,
+  Plus,
 } from 'lucide-react'
 import { useDispatch, useSelector } from 'react-redux'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -38,6 +56,26 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import type { RootState } from '@/store/index'
 import { teachers, schools, subjects } from '@/mock'
@@ -46,6 +84,7 @@ import {
   addScheduleRaw,
   updateSchedule,
   deleteSchedule,
+  deleteProjectSchedules,
 } from '@/store/editDataReducer'
 import {
   InputGroup,
@@ -67,7 +106,11 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from '@/components/ui/hover-card'
-import { loadProjects } from '@/store/projectsReducer'
+import {
+  addProject,
+  removeProject,
+  updateProject,
+} from '@/store/projectsReducer'
 import type { Project } from '@/store/projectsReducer'
 import { loadTeachers } from '@/store/teachersReducer'
 import type { Teacher } from '@/store/teachersReducer'
@@ -195,6 +238,21 @@ function App() {
   const projectData = useSelector((state: RootState) => state.projects.projects)
   const teacherData = useSelector((state: RootState) => state.teachers.teachers)
 
+  const [createProjectData, setCreateProjectData] = useState<{
+    name: string
+    schoolId: string
+    schoolName: string
+    description: string
+  }>({
+    name: '',
+    schoolId: '',
+    schoolName: '',
+    description: '',
+  })
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
+  const [deleteProjectTarget, setDeleteProjectTarget] =
+    useState<Project | null>(null)
+  const [addProjectOpen, setAddProjectOpen] = useState(false)
   const prevScheduleDataRef = useRef(scheduleData)
   const isApplyingUndoRedoRef = useRef(false)
   const canUndoAvailable = useSelector(selectCanUndo)
@@ -203,6 +261,7 @@ function App() {
   const editCursor = useSelector((state: RootState) => state.editLog.cursor)
   const prevCursorRef = useRef(0)
   const ignoreNextApplyCountRef = useRef(0)
+  const [selectedSchool, setSelectedSchool] = useState<school[]>([])
 
   const [midDate, setMidDate] = useState<dateObj | null>(null)
   const [renderSubject, setRenderSubject] = useState(subjects)
@@ -239,20 +298,12 @@ function App() {
 
   const handleSelectSchool = (e: string[]) => {
     if (e.length > 0) {
-      let projects: Project[] = []
+      let _school: school[] = []
       e.forEach((schoolId) => {
         const school = schools.find((s) => s.value === schoolId)
-        const classes = school?.classes.map((c) => {
-          return {
-            ...c,
-            schoolId: school.value,
-            schoolName: school.label,
-            description: '',
-          }
-        })
-        projects = projects.concat(classes || [])
+        _school = _school.concat(school || [])
       })
-      dispatch(loadProjects(projects))
+      setSelectedSchool(_school)
     }
   }
   const handleDeleteSelectedGlobal = () => {
@@ -370,6 +421,54 @@ function App() {
     })
   }
 
+  const resetProjectForm = () => {
+    setCreateProjectData({
+      name: '',
+      schoolId: '',
+      schoolName: '',
+      description: '',
+    })
+    setEditingProjectId(null)
+  }
+
+  const handleProjectDialogChange = (open: boolean) => {
+    setAddProjectOpen(open)
+    if (!open) resetProjectForm()
+  }
+
+  const handleCreateProject = () => {
+    const projectId = editingProjectId ?? randomString(16)
+    const payload = { ...createProjectData, id: projectId }
+    if (!payload.schoolId) {
+      toast.error('请选择一个校区')
+      return
+    }
+    setAddProjectOpen(false)
+    if (editingProjectId) {
+      dispatch(updateProject(payload))
+    } else {
+      dispatch(addProject(payload))
+    }
+    resetProjectForm()
+  }
+
+  const handleEditProject = (project: Project) => {
+    setCreateProjectData({
+      name: project.name,
+      schoolId: project.schoolId,
+      schoolName: project.schoolName,
+      description: project.description,
+    })
+    setEditingProjectId(project.id)
+    setAddProjectOpen(true)
+  }
+
+  const handleDeleteProject = (project: Project) => {
+    dispatch(deleteProjectSchedules(project.id))
+    dispatch(removeProject(project.id))
+    toast.success('删除成功', { description: project.name })
+  }
+
   const handleScheduleDragStart = (
     e: DragEvent<HTMLDivElement>,
     projectId: string,
@@ -450,10 +549,8 @@ function App() {
       if (!old) return
       const startDate = new Date(dateRange.start)
       startDate.setDate(startDate.getDate() + (colIndex - 1))
-      console.log(dragMeta.durationDays)
       const endDate = new Date(startDate)
       endDate.setDate(startDate.getDate() + ((dragMeta.durationDays ?? 1) - 1))
-      console.log(startDate, endDate)
       const teacher = findTeacher(old.teacherId)
       if (hasOverlap(projectId, startDate, endDate)) {
         toast.error('日期冲突', { description: '该项目在所选日期已有安排' })
@@ -1076,6 +1173,7 @@ function App() {
       conflictProject?: boolean
       conflictTeacher?: boolean
     }
+    //分离出候选项目
     const candidates: MoveCandidate[] = []
     const movedIds = new Set<string>()
 
@@ -1104,6 +1202,7 @@ function App() {
     const feasible: MoveCandidate[] = []
     const conflicts: MoveCandidate[] = []
 
+    //第一轮冲突检测，检查可移动候选安排和不需要移动的安排是否有时间和教师冲突
     for (const c of candidates) {
       const { item, newStart, newEnd } = c
       const others = (scheduleData[item.projectId] || []).filter(
@@ -1127,117 +1226,117 @@ function App() {
         feasible.push(c)
       }
     }
-    {
-      const byProject = new Map<string, MoveCandidate[]>()
-      feasible.forEach((c) => {
-        const key = c.item.projectId
-        const arr = byProject.get(key) || []
-        arr.push(c)
-        byProject.set(key, arr)
-      })
-      const conflictIds = new Set<string>()
-      byProject.forEach((list) => {
-        list.sort((a, b) => a.newStart - b.newStart)
-        for (let i = 1; i < list.length; i++) {
-          const prev = list[i - 1]
-          const cur = list[i]
-          if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
-            conflictIds.add(prev.item.scheduleId)
-            conflictIds.add(cur.item.scheduleId)
-          }
-        }
-      })
-      const byTeacher = new Map<string, MoveCandidate[]>()
-      feasible.forEach((c) => {
-        const t = c.item.teacherId
-        if (!t) return
-        const arr = byTeacher.get(t) || []
-        arr.push(c)
-        byTeacher.set(t, arr)
-      })
-      byTeacher.forEach((list) => {
-        list.sort((a, b) => a.newStart - b.newStart)
-        for (let i = 1; i < list.length; i++) {
-          const prev = list[i - 1]
-          const cur = list[i]
-          if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
-            conflictIds.add(prev.item.scheduleId)
-            conflictIds.add(cur.item.scheduleId)
-          }
-        }
-      })
-      if (conflictIds.size > 0) {
-        const stillFeasible: MoveCandidate[] = []
-        const newlyConflicted: MoveCandidate[] = []
-        feasible.forEach((c) => {
-          if (conflictIds.has(c.item.scheduleId)) {
-            newlyConflicted.push({ ...c, conflictProject: true })
-          } else {
-            stillFeasible.push(c)
-          }
-        })
-        feasible.length = 0
-        feasible.push(...stillFeasible)
-        conflicts.push(...newlyConflicted)
-      }
-      const conflictsByProject = new Map<
-        string,
-        { start: number; end: number }[]
-      >()
-      conflicts.forEach((c) => {
-        const key = c.item.projectId
-        const arr = conflictsByProject.get(key) || []
-        arr.push({ start: c.item.startDate, end: c.item.endDate })
-        conflictsByProject.set(key, arr)
-      })
-      const conflictsByTeacher = new Map<
-        string,
-        { start: number; end: number }[]
-      >()
-      conflicts.forEach((c) => {
-        const t = c.item.teacherId
-        if (!t) return
-        const arr = conflictsByTeacher.get(t) || []
-        arr.push({ start: c.item.startDate, end: c.item.endDate })
-        conflictsByTeacher.set(t, arr)
-      })
+    // {
+    //   const byProject = new Map<string, MoveCandidate[]>()
+    //   feasible.forEach((c) => {
+    //     const key = c.item.projectId
+    //     const arr = byProject.get(key) || []
+    //     arr.push(c)
+    //     byProject.set(key, arr)
+    //   })
+    //   const conflictIds = new Set<string>()
+    //   byProject.forEach((list) => {
+    //     list.sort((a, b) => a.newStart - b.newStart)
+    //     for (let i = 1; i < list.length; i++) {
+    //       const prev = list[i - 1]
+    //       const cur = list[i]
+    //       if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
+    //         conflictIds.add(prev.item.scheduleId)
+    //         conflictIds.add(cur.item.scheduleId)
+    //       }
+    //     }
+    //   })
+    //   const byTeacher = new Map<string, MoveCandidate[]>()
+    //   feasible.forEach((c) => {
+    //     const t = c.item.teacherId
+    //     if (!t) return
+    //     const arr = byTeacher.get(t) || []
+    //     arr.push(c)
+    //     byTeacher.set(t, arr)
+    //   })
+    //   byTeacher.forEach((list) => {
+    //     list.sort((a, b) => a.newStart - b.newStart)
+    //     for (let i = 1; i < list.length; i++) {
+    //       const prev = list[i - 1]
+    //       const cur = list[i]
+    //       if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
+    //         conflictIds.add(prev.item.scheduleId)
+    //         conflictIds.add(cur.item.scheduleId)
+    //       }
+    //     }
+    //   })
+    //   if (conflictIds.size > 0) {
+    //     const stillFeasible: MoveCandidate[] = []
+    //     const newlyConflicted: MoveCandidate[] = []
+    //     feasible.forEach((c) => {
+    //       if (conflictIds.has(c.item.scheduleId)) {
+    //         newlyConflicted.push({ ...c, conflictProject: true })
+    //       } else {
+    //         stillFeasible.push(c)
+    //       }
+    //     })
+    //     feasible.length = 0
+    //     feasible.push(...stillFeasible)
+    //     conflicts.push(...newlyConflicted)
+    //   }
+    //   const conflictsByProject = new Map<
+    //     string,
+    //     { start: number; end: number }[]
+    //   >()
+    //   conflicts.forEach((c) => {
+    //     const key = c.item.projectId
+    //     const arr = conflictsByProject.get(key) || []
+    //     arr.push({ start: c.item.startDate, end: c.item.endDate })
+    //     conflictsByProject.set(key, arr)
+    //   })
+    //   const conflictsByTeacher = new Map<
+    //     string,
+    //     { start: number; end: number }[]
+    //   >()
+    //   conflicts.forEach((c) => {
+    //     const t = c.item.teacherId
+    //     if (!t) return
+    //     const arr = conflictsByTeacher.get(t) || []
+    //     arr.push({ start: c.item.startDate, end: c.item.endDate })
+    //     conflictsByTeacher.set(t, arr)
+    //   })
 
-      const conflictIds2 = new Set<string>()
-      feasible.forEach((c) => {
-        const projRanges = conflictsByProject.get(c.item.projectId) || []
-        if (
-          projRanges.some((e) => !(c.newEnd < e.start || c.newStart > e.end))
-        ) {
-          conflictIds2.add(c.item.scheduleId)
-          return
-        }
-        const t = c.item.teacherId
-        if (t) {
-          const teacherRanges = conflictsByTeacher.get(t) || []
-          if (
-            teacherRanges.some(
-              (e) => !(c.newEnd < e.start || c.newStart > e.end)
-            )
-          ) {
-            conflictIds2.add(c.item.scheduleId)
-          }
-        }
-      })
-      if (conflictIds2.size > 0) {
-        const stillFeasible: MoveCandidate[] = []
-        const newlyConflicted: MoveCandidate[] = []
-        feasible.forEach((c) => {
-          if (conflictIds2.has(c.item.scheduleId)) {
-            newlyConflicted.push({ ...c, conflictProject: true })
-          } else {
-            stillFeasible.push(c)
-          }
-        })
-        feasible.length = 0
-        feasible.push(...stillFeasible)
-        conflicts.push(...newlyConflicted)
-      }
-    }
+    //   const conflictIds2 = new Set<string>()
+    //   feasible.forEach((c) => {
+    //     const projRanges = conflictsByProject.get(c.item.projectId) || []
+    //     if (
+    //       projRanges.some((e) => !(c.newEnd < e.start || c.newStart > e.end))
+    //     ) {
+    //       conflictIds2.add(c.item.scheduleId)
+    //       return
+    //     }
+    //     const t = c.item.teacherId
+    //     if (t) {
+    //       const teacherRanges = conflictsByTeacher.get(t) || []
+    //       if (
+    //         teacherRanges.some(
+    //           (e) => !(c.newEnd < e.start || c.newStart > e.end)
+    //         )
+    //       ) {
+    //         conflictIds2.add(c.item.scheduleId)
+    //       }
+    //     }
+    //   })
+    //   if (conflictIds2.size > 0) {
+    //     const stillFeasible: MoveCandidate[] = []
+    //     const newlyConflicted: MoveCandidate[] = []
+    //     feasible.forEach((c) => {
+    //       if (conflictIds2.has(c.item.scheduleId)) {
+    //         newlyConflicted.push({ ...c, conflictProject: true })
+    //       } else {
+    //         stillFeasible.push(c)
+    //       }
+    //     })
+    //     feasible.length = 0
+    //     feasible.push(...stillFeasible)
+    //     conflicts.push(...newlyConflicted)
+    //   }
+    // }
 
     if (conflicts.length > 0) {
       toast.error('存在冲突安排', {
@@ -1405,6 +1504,26 @@ function App() {
                               {item.phone}
                             </div>
                           </div>
+                          <div
+                            className="rounded-full bg-blue-50 p-2"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              console.log('helloo')
+                            }}
+                          >
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <ChartNoAxesGantt
+                                  strokeWidth={3}
+                                  size={20}
+                                  color="oklch(55.1% 0.027 264.364)"
+                                />
+                              </TooltipTrigger>
+                              <TooltipContent side="right">
+                                查看讲师排期
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                         </div>
                       </HoverCardTrigger>
                       <HoverCardContent className="w-auto">
@@ -1436,7 +1555,7 @@ function App() {
                   ))}
                 </div>
               </div>
-              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white/70 backdrop-blur-md">
+              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white/70 shadow-md backdrop-blur-md">
                 <InputGroup>
                   <InputGroupInput
                     value={subjectSearch.text}
@@ -1470,7 +1589,7 @@ function App() {
                   </InputGroupAddon>
                 </InputGroup>
               </div>
-              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white/70 backdrop-blur-md">
+              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white/70 shadow-md backdrop-blur-md">
                 <div className="flex items-center justify-center space-x-2 pl-2">
                   <Label className="mr-0 w-12" htmlFor="airplane-mode">
                     按科目
@@ -1609,93 +1728,114 @@ function App() {
                   {Array.from({
                     length:
                       countDaysInclusive(dateRange.start, dateRange.end) + 1,
-                  }).map((_, index) => (
-                    <DropdownMenu
-                      key={index}
-                      onOpenChange={(e) => {
-                        if (e) setMidDate(days[index - 1])
-                        else setMidDate(null)
-                      }}
-                    >
-                      <DropdownMenuTrigger asChild>
+                  }).map((_, index) => {
+                    if (index <= 0) {
+                      return (
                         <div
-                          key={index}
-                          className={cn(
-                            'box-border flex cursor-pointer items-end pl-2 text-xs text-gray-400 transition-all hover:text-black',
-                            index > 0 ? 'border-l' : ''
-                          )}
+                          key={0}
+                          className="flex cursor-pointer items-center justify-center gap-1 text-sm hover:bg-gray-200"
+                          onClick={() => {
+                            if (selectedSchool.length <= 0) {
+                              toast.error('请先选择校区')
+                              return
+                            }
+                            resetProjectForm()
+                            setAddProjectOpen(true)
+                          }}
                         >
-                          {index > 0 && days.length > 0 && (
-                            <div className="flex flex-col leading-tight">
-                              <span>
-                                {days[index - 1]?.month +
-                                  '月' +
-                                  days[index - 1]?.day +
-                                  '日'}
-                              </span>
-                              <span className="text-[10px]">
-                                {'周' +
-                                  '日一二三四五六'[
-                                    new Date(
-                                      days[index - 1].year,
-                                      days[index - 1].month - 1,
-                                      days[index - 1].day
-                                    ).getDay()
-                                  ]}
-                              </span>
-                            </div>
-                          )}
+                          <Plus size={16} />
+                          新增课程
                         </div>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-56" align="start">
-                        <DropdownMenuGroup>
-                          <DropdownMenuLabel>
-                            {days[index - 1]?.month +
-                              '月' +
-                              days[index - 1]?.day +
-                              '日'}
-                            之后课程安排
-                          </DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              shiftSchedules('after', 'forward', 1)
-                            }}
+                      )
+                    }
+                    return (
+                      <DropdownMenu
+                        key={index}
+                        onOpenChange={(e) => {
+                          if (e) setMidDate(days[index - 1])
+                          else setMidDate(null)
+                        }}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <div
+                            key={index}
+                            className={cn(
+                              'box-border flex cursor-pointer items-end pl-2 text-xs text-gray-400 transition-all hover:text-black',
+                              index > 0 ? 'border-l' : ''
+                            )}
                           >
-                            向后调整1天
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              shiftSchedules('after', 'backward', 1)
-                            }}
-                          >
-                            向前调整1天
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel>
-                            {days[index - 1]?.month +
-                              '月' +
-                              days[index - 1]?.day +
-                              '日'}
-                            之前课程安排
-                          </DropdownMenuLabel>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              shiftSchedules('before', 'forward', 1)
-                            }}
-                          >
-                            向后调整1天
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              shiftSchedules('before', 'backward', 1)
-                            }}
-                          >
-                            向前调整1天
-                          </DropdownMenuItem>
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ))}
+                            {index > 0 && days.length > 0 && (
+                              <div className="flex flex-col leading-tight">
+                                <span>
+                                  {days[index - 1]?.month +
+                                    '月' +
+                                    days[index - 1]?.day +
+                                    '日'}
+                                </span>
+                                <span className="text-[10px]">
+                                  {'周' +
+                                    '日一二三四五六'[
+                                      new Date(
+                                        days[index - 1].year,
+                                        days[index - 1].month - 1,
+                                        days[index - 1].day
+                                      ).getDay()
+                                    ]}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="w-56" align="start">
+                          <DropdownMenuGroup>
+                            <DropdownMenuLabel>
+                              {days[index - 1]?.month +
+                                '月' +
+                                days[index - 1]?.day +
+                                '日'}
+                              之后课程安排
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                shiftSchedules('after', 'forward', 1)
+                              }}
+                            >
+                              向后调整1天
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                shiftSchedules('after', 'backward', 1)
+                              }}
+                            >
+                              向前调整1天
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel>
+                              {days[index - 1]?.month +
+                                '月' +
+                                days[index - 1]?.day +
+                                '日'}
+                              之前课程安排
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                shiftSchedules('before', 'forward', 1)
+                              }}
+                            >
+                              向后调整1天
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                shiftSchedules('before', 'backward', 1)
+                              }}
+                            >
+                              向前调整1天
+                            </DropdownMenuItem>
+                          </DropdownMenuGroup>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )
+                  })}
                 </div>
                 <div
                   id="schedule-classes"
@@ -1743,23 +1883,47 @@ function App() {
                       onMouseUp={(e) => handleRowMouseUp(e, item.id)}
                     >
                       <div className="sticky top-0 left-0 z-30 flex h-13 w-full items-center justify-center">
-                        <div
-                          className={cn(
-                            'flex h-13 w-22 flex-col rounded-md border-2 border-dashed border-gray-50 bg-white p-1 text-xs shadow-md'
-                          )}
-                        >
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                'flex h-13 w-22 cursor-pointer flex-col rounded-md border-2 border-gray-50/50 bg-white/70 p-1 text-xs shadow-md backdrop-blur-md transition-all hover:shadow-xl focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                              )}
+                            >
                               <div className="mb-1 w-18 flex-nowrap truncate text-xs text-gray-500">
-                                {item.schoolName}
+                                <ScrollText speed={120}>
+                                  {item.schoolName}
+                                </ScrollText>
                               </div>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>{item.schoolName}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                          <div className="flex select-none">{item.name}</div>
-                        </div>
+                              <div className="flex truncate select-none">
+                                <ScrollText speed={120}>{item.name}</ScrollText>
+                              </div>
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" side="bottom">
+                            <DropdownMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault()
+                                handleEditProject(item)
+                              }}
+                              className="gap-2"
+                            >
+                              <SquarePen className="h-4 w-4" />
+                              编辑
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault()
+                                setDeleteProjectTarget(item)
+                              }}
+                              className="gap-2 text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              删除
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                       {getDaysInRange(dateRange.start, dateRange.end).map(
                         (day, index) => (
@@ -1988,6 +2152,106 @@ function App() {
           </div>
         </div>
       </div>
+      <Dialog open={addProjectOpen} onOpenChange={handleProjectDialogChange}>
+        <form>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>
+                {editingProjectId ? '编辑班期' : '创建班期'}
+              </DialogTitle>
+              <DialogDescription>
+                {editingProjectId ? '更新课程班期信息' : '新增一个课程班期'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4">
+              <div className="grid gap-3">
+                <Label htmlFor="name-1">校区</Label>
+                <Select
+                  value={createProjectData.schoolId}
+                  onValueChange={(e) => {
+                    const school = schools.find((item) => item.value === e)
+                    if (school) {
+                      setCreateProjectData({
+                        ...createProjectData,
+                        schoolId: school ? school.value : '',
+                        schoolName: school ? school.label : '',
+                      })
+                    }
+                    console.log(e)
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择一个校区" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel>校区列表</SelectLabel>
+                      {selectedSchool.map((item) => (
+                        <SelectItem key={item.value} value={item.value}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="className">班期名称</Label>
+                <Input
+                  value={createProjectData.name}
+                  onInput={(e) =>
+                    setCreateProjectData({
+                      ...createProjectData,
+                      name: e.currentTarget.value,
+                    })
+                  }
+                  id="className"
+                  placeholder="请输入班期名称"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">取消</Button>
+              </DialogClose>
+              <Button onClick={handleCreateProject} type="submit">
+                {editingProjectId ? '保存' : '创建'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </form>
+      </Dialog>
+      <AlertDialog
+        open={!!deleteProjectTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteProjectTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除班期？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteProjectTarget
+                ? `将删除班期「${deleteProjectTarget.name}」，其课程排期也将移除。此操作不可撤销。`
+                : '此操作不可撤销。'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteProjectTarget) {
+                  handleDeleteProject(deleteProjectTarget)
+                  setDeleteProjectTarget(null)
+                }
+              }}
+              className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600"
+            >
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

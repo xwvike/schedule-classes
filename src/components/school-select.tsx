@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/command'
 import { Check, ChevronsUpDown } from 'lucide-react'
 
-type school = {
+export type school = {
   value: string
   label: string
 }

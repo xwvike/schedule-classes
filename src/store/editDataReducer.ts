@@ -136,6 +136,12 @@ const editDataSlice = createSlice({
     loadNewSchedule: (state, action: PayloadAction<ScheduleData>) => {
       state.scheduleData = action.payload
     },
+    deleteProjectSchedules: (state, action: PayloadAction<string>) => {
+      const projectId = action.payload
+      if (state.scheduleData[projectId]) {
+        delete state.scheduleData[projectId]
+      }
+    },
   },
 })
 
@@ -145,5 +151,6 @@ export const {
   updateSchedule,
   deleteSchedule,
   loadNewSchedule,
+  deleteProjectSchedules,
 } = editDataSlice.actions
 export default editDataSlice.reducer
