@@ -891,32 +891,35 @@ function App() {
         !(e < it.startDate || s > it.endDate)
     )
   }
-  const hasTeacherOverlap = (
-    teacherId: string,
-    start: Date,
-    end: Date,
-    excludeIds?: string[] | string
-  ): boolean => {
-    const s = start.getTime()
-    const e = end.getTime()
-    const exclude = new Set(
-      Array.isArray(excludeIds) ? excludeIds : excludeIds ? [excludeIds] : []
-    )
-    for (const pid in scheduleData) {
-      const entries = scheduleData[pid] || []
-      if (
-        entries.some(
-          (it) =>
-            it.teacherId === teacherId &&
-            !exclude.has(it.scheduleId) &&
-            !(e < it.startDate || s > it.endDate)
-        )
-      ) {
-        return true
+  const hasTeacherOverlap = useCallback(
+    (
+      teacherId: string,
+      start: Date,
+      end: Date,
+      excludeIds?: string[] | string
+    ): boolean => {
+      const s = start.getTime()
+      const e = end.getTime()
+      const exclude = new Set(
+        Array.isArray(excludeIds) ? excludeIds : excludeIds ? [excludeIds] : []
+      )
+      for (const pid in scheduleData) {
+        const entries = scheduleData[pid] || []
+        if (
+          entries.some(
+            (it) =>
+              it.teacherId === teacherId &&
+              !exclude.has(it.scheduleId) &&
+              !(e < it.startDate || s > it.endDate)
+          )
+        ) {
+          return true
+        }
       }
-    }
-    return false
-  }
+      return false
+    },
+    [scheduleData]
+  )
   const hasTeacherExternalConflict = useCallback(
     (teacherId: string, start: Date, end: Date) => {
       const teacherExt = teacherSchedule.find(
