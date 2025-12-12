@@ -58,3 +58,39 @@ export function getDaysInRange(
 
   return days
 }
+
+export function generateDateRangeAroundToday(day: number = 15): Array<{
+  year: number
+  month: number
+  day: number
+  dayOfWeek: number
+  dayOfWeekName: string
+}> {
+  const today = new Date()
+  const result: Array<{
+    year: number
+    month: number
+    day: number
+    dayOfWeek: number
+    dayOfWeekName: string
+  }> = []
+
+  const dayNames = ['日', '一', '二', '三', '四', '五', '六']
+
+  for (let i = -day; i <= day; i++) {
+    const date = new Date(today)
+    date.setDate(today.getDate() + i)
+
+    const dayOfWeek = date.getDay()
+
+    result.push({
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+      dayOfWeek: dayOfWeek,
+      dayOfWeekName: dayNames[dayOfWeek],
+    })
+  }
+
+  return result
+}

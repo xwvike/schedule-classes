@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ChevronDownIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
@@ -8,12 +8,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 
-type DateRange = { start?: Date | null; end?: Date | null }
+export type DateRangeValue = { start?: Date | null; end?: Date | null }
 
 type DateRangePickerProps = {
-  value?: DateRange
-  defaultValue?: DateRange
-  onChange?: (next: DateRange) => void
+  value?: DateRangeValue
+  defaultValue?: DateRangeValue
+  onChange?: (next: DateRangeValue) => void
   onStartChange?: (date?: Date) => void
   onEndChange?: (date?: Date) => void
   startPlaceholder?: string
@@ -50,12 +50,12 @@ function DateRangePicker(props: DateRangePickerProps) {
   const formatDate = (d?: Date) =>
     d ? (formatDateProp ? formatDateProp(d) : d.toLocaleDateString()) : ''
 
-  const normalizeRange = (s?: Date, e?: Date): DateRange => {
+  const normalizeRange = (s?: Date, e?: Date): DateRangeValue => {
     if (!enforceOrder || !s || !e) return { start: s, end: e }
     return s <= e ? { start: s, end: e } : { start: e, end: s }
   }
 
-  const applyNext = (next: DateRange) => {
+  const applyNext = (next: DateRangeValue) => {
     if (!value) {
       setDateStart(next.start || undefined)
       setDateEnd(next.end || undefined)
@@ -128,4 +128,4 @@ function DateRangePicker(props: DateRangePickerProps) {
   )
 }
 
-export default DateRangePicker
+export default memo(DateRangePicker)

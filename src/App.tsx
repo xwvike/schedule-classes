@@ -6,10 +6,17 @@ import {
 } from '@/lib/utils'
 import Header from './components/header'
 import ScrollText from './components/scroll-text'
-import DateRangePicker from './components/date-range-picker'
+import DateRangePicker, {
+  type DateRangeValue,
+} from './components/date-range-picker'
 import SchoolSelect from './components/school-select'
 import type { school } from './components/school-select'
 import { Button } from '@/components/ui/button'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,8 +36,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { useEffect, useRef, useState } from 'react'
-import dayjs from 'dayjs'
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import dayjs, { type Dayjs } from 'dayjs'
 import type {
   DragEvent,
   MouseEvent as ReactMouseEvent,
@@ -48,7 +63,7 @@ import {
   ChartNoAxesGantt,
   Plus,
 } from 'lucide-react'
-import { useDispatch, useSelector } from 'react-redux'
+import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
   Tooltip,
@@ -78,7 +93,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
 import type { RootState } from '@/store/index'
-import { teachers, schools, subjects } from '@/mock'
+import { teachers, schools, subjects, teacherSchedule } from '@/mock'
 import {
   addSchedule,
   addScheduleRaw,
@@ -140,6 +155,23 @@ type ScheduleItem = {
   area: string
 }
 
+type ScheduleEditState = {
+  visibleEntry: boolean
+  visibleEdit: boolean
+  scheduleId: string
+  subjectsId: string
+  teacherId: string
+  projectId: string
+  projectName: string
+  schoolName: string
+  startDate: string
+  endDate: string
+  startTimestamp: number | null
+  endTimestamp: number | null
+}
+
+type ScheduleDataMap = Record<string, ScheduleItem[]>
+
 type EditLogEntry = {
   time: number
   op: 'add' | 'update' | 'delete'
@@ -151,6 +183,497 @@ type EditLogEntry = {
 
 // Drag handlers extracted for reuse
 const COL_WIDTH = 100
+
+type TimeBarProps = {
+  days: Array<{ year: number; month: number; day: number }>
+  dateRange: DateRange
+  onAddCourse: () => void
+  onOpenDay: (day: dateObj | null) => void
+  onShift: (
+    scope: 'before' | 'after',
+    direction: 'forward' | 'backward',
+    amount: number
+  ) => void
+}
+
+type SubjectSelectorProps = {
+  renderSubject: typeof subjects
+  scheduleEdit: ScheduleEditState
+  onSelect: (checked: CheckedState, id: string) => void
+}
+
+type TeacherSelectorProps = {
+  teacherData: Teacher[]
+  scheduleEdit: ScheduleEditState
+  onSelect: (id: string) => void
+  dateRange: DateRange
+  scheduleData: ScheduleDataMap
+}
+
+type TeacherOptionProps = {
+  item: Teacher
+  selected: boolean
+  onSelect: (id: string) => void
+  scheduleEdit: ScheduleEditState
+  dateRange: DateRange
+  scheduleData: ScheduleDataMap
+}
+
+const TimeBar = memo(
+  forwardRef<HTMLDivElement, TimeBarProps>(function TimeBar(
+    { days, dateRange, onAddCourse, onOpenDay, onShift },
+    ref
+  ) {
+    const columnCount = countDaysInclusive(dateRange.start, dateRange.end) + 1
+
+    return (
+      <div
+        id="time-bar"
+        ref={ref}
+        className={cn(
+          'absolute top-0 left-0 grid h-8 border-b border-gray-200'
+        )}
+        style={{ gridTemplateColumns: `repeat(${columnCount}, 100px)` }}
+      >
+        {Array.from({ length: days.length + 1 }).map((_, index) => {
+          if (index === 0) {
+            return (
+              <div
+                key={index}
+                className="flex cursor-pointer items-center justify-center gap-1 text-sm hover:bg-gray-200"
+                onClick={onAddCourse}
+              >
+                <Plus size={16} />
+                新增课程
+              </div>
+            )
+          }
+          const day = days[index - 1]
+          if (!day) return null
+          const label = `${day.month}月${day.day}日`
+
+          return (
+            <DropdownMenu
+              key={index}
+              onOpenChange={(e) => onOpenDay(e ? day : null)}
+            >
+              <DropdownMenuTrigger asChild>
+                <div
+                  className={cn(
+                    'box-border flex cursor-pointer items-end pl-2 text-xs text-gray-400 transition-all hover:text-black',
+                    'border-l'
+                  )}
+                >
+                  <div className="flex flex-col leading-tight">
+                    <span>{label}</span>
+                    <span className="text-[10px]">
+                      {'周' +
+                        '日一二三四五六'[
+                          new Date(day.year, day.month - 1, day.day).getDay()
+                        ]}
+                    </span>
+                  </div>
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="start">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{label}之后课程安排</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={() => onShift('after', 'forward', 1)}
+                  >
+                    向后调整1天
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => onShift('after', 'backward', 1)}
+                  >
+                    向前调整1天
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>{label}之前课程安排</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={() => onShift('before', 'forward', 1)}
+                  >
+                    向后调整1天
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => onShift('before', 'backward', 1)}
+                  >
+                    向前调整1天
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        })}
+      </div>
+    )
+  })
+)
+
+const SubjectSelector = memo(function SubjectSelector({
+  renderSubject,
+  scheduleEdit,
+  onSelect,
+}: SubjectSelectorProps) {
+  return (
+    <>
+      <div
+        className={cn(
+          'sticky top-0 left-0 flex w-full items-center gap-2 overflow-hidden rounded-tl-md border-gray-300 bg-white px-2 text-gray-700 transition-all',
+          scheduleEdit.visibleEdit ? 'h-10 border-b' : 'h-0 border-none'
+        )}
+      >
+        <TableProperties size={20} />
+        {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排科目`}
+      </div>
+      <FieldGroup className="flex flex-row flex-wrap gap-2 p-2 [--radius:9999rem]">
+        {renderSubject.map((option) => (
+          <FieldLabel
+            htmlFor={option.id}
+            key={option.id}
+            className="w-fit! bg-white"
+          >
+            <Field
+              orientation="horizontal"
+              className="cursor-pointer gap-1.5 overflow-hidden px-3! py-1.5! transition-all duration-100 ease-linear group-has-data-[state=checked]/field-label:px-2!"
+            >
+              <Checkbox
+                value={option.id}
+                id={option.id}
+                onCheckedChange={(checked) => onSelect(checked, option.id)}
+                checked={scheduleEdit.subjectsId === option.id}
+                className="-ml-6 -translate-x-1 rounded-full bg-white transition-all duration-100 ease-linear data-[state=checked]:ml-0 data-[state=checked]:translate-x-0"
+              />
+              <FieldTitle>{option.name}</FieldTitle>
+            </Field>
+          </FieldLabel>
+        ))}
+      </FieldGroup>
+    </>
+  )
+})
+
+const TeacherSelector = memo(function TeacherSelector({
+  teacherData,
+  scheduleEdit,
+  onSelect,
+  dateRange,
+  scheduleData,
+}: TeacherSelectorProps) {
+  return (
+    <>
+      <div
+        className={cn(
+          'sticky top-0 left-0 z-30 flex w-full items-center gap-2 overflow-hidden rounded-tr-md border-gray-300 bg-white px-2 text-gray-700 transition-all',
+          scheduleEdit.visibleEdit ? 'h-10 border-b' : 'h-0 border-none'
+        )}
+      >
+        <User size={20} />
+        {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排上课讲师`}
+      </div>
+
+      <div className="flex flex-wrap content-start items-start gap-2 p-2 pb-20">
+        {teacherData.map((item) => (
+          <TeacherOption
+            key={item.id}
+            item={item}
+            selected={item.id === scheduleEdit.teacherId}
+            onSelect={onSelect}
+            scheduleEdit={scheduleEdit}
+            dateRange={dateRange}
+            scheduleData={scheduleData}
+          />
+        ))}
+      </div>
+    </>
+  )
+})
+
+const TeacherOption = memo(function TeacherOption({
+  item,
+  selected,
+  onSelect,
+  scheduleEdit,
+  dateRange,
+  scheduleData,
+}: TeacherOptionProps) {
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null)
+  const teacherScheduleData = useMemo(
+    () => teacherSchedule.find((schedule) => schedule.teacherId === item.id),
+    [item.id]
+  )
+
+  const parsedSchedules = useMemo(() => {
+    if (!teacherScheduleData) return []
+
+    return teacherScheduleData.schedule
+      .map(({ start, end }) => {
+        const startDate = dayjs(start, 'YYYY.MM.DD').startOf('day')
+        const endDate = dayjs(end, 'YYYY.MM.DD').startOf('day')
+
+        if (!startDate.isValid() || !endDate.isValid()) return null
+        if (endDate.diff(startDate, 'day') < 0) return null
+
+        return {
+          start: startDate,
+          end: endDate,
+          label: `${startDate.format('MM.DD')} - ${endDate.format('MM.DD')}`,
+        }
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          start: Dayjs
+          end: Dayjs
+          label: string
+        } => Boolean(item)
+      )
+  }, [teacherScheduleData])
+
+  const timelineDays = useMemo(() => {
+    if (!dateRange.start || !dateRange.end) return []
+    return getDaysInRange(dateRange.start, dateRange.end).map((d) => {
+      const dateObj = new Date(d.year, d.month - 1, d.day)
+      return {
+        ...d,
+        dayOfWeekName: '日一二三四五六'[dateObj.getDay()],
+      }
+    })
+  }, [dateRange.end, dateRange.start])
+
+  const axisStartDate = useMemo(() => {
+    if (!dateRange.start) return null
+    return dayjs(dateRange.start).startOf('day')
+  }, [dateRange.start])
+
+  const axisEndDate = useMemo(() => {
+    if (!dateRange.end) return null
+    return dayjs(dateRange.end).startOf('day')
+  }, [dateRange.end])
+
+  const scheduleBlocks = useMemo(() => {
+    if (!axisStartDate || !axisEndDate) return []
+
+    return parsedSchedules
+      .map((slot, index) => {
+        if (
+          slot.end.isBefore(axisStartDate) ||
+          slot.start.isAfter(axisEndDate)
+        ) {
+          return null
+        }
+
+        const displayStart = slot.start.isBefore(axisStartDate)
+          ? axisStartDate
+          : slot.start
+        const displayEnd = slot.end.isAfter(axisEndDate)
+          ? axisEndDate
+          : slot.end
+
+        const offset = displayStart.diff(axisStartDate, 'day')
+        const duration = displayEnd.diff(displayStart, 'day') + 1
+
+        return {
+          key: `${item.id}-${index}`,
+          left: offset * COL_WIDTH,
+          width: Math.max(duration, 1) * COL_WIDTH,
+          label: slot.label,
+          clippedLeft: slot.start.isBefore(axisStartDate),
+          clippedRight: slot.end.isAfter(axisEndDate),
+        }
+      })
+      .filter(
+        (
+          block
+        ): block is {
+          key: string
+          left: number
+          width: number
+          label: string
+          clippedLeft: boolean
+          clippedRight: boolean
+        } => Boolean(block)
+      )
+  }, [axisStartDate, axisEndDate, parsedSchedules, item.id])
+
+  const editingRange = useMemo(() => {
+    if (
+      !scheduleEdit.visibleEdit ||
+      scheduleEdit.startTimestamp === null ||
+      scheduleEdit.endTimestamp === null
+    ) {
+      return null
+    }
+    const start = dayjs(scheduleEdit.startTimestamp).startOf('day')
+    const end = dayjs(scheduleEdit.endTimestamp).startOf('day')
+    if (!start.isValid() || !end.isValid()) return null
+    if (end.diff(start, 'day') < 0) return null
+    return { start, end }
+  }, [scheduleEdit])
+
+  const hasInternalBusy = useMemo(() => {
+    if (!editingRange) return false
+    const s = editingRange.start.valueOf()
+    const e = editingRange.end.valueOf()
+
+    return Object.values(scheduleData).some((list) =>
+      list.some(
+        (entry) =>
+          entry.teacherId === item.id &&
+          entry.scheduleId !== scheduleEdit.scheduleId &&
+          !(e < entry.startDate || s > entry.endDate)
+      )
+    )
+  }, [editingRange, item.id, scheduleData, scheduleEdit.scheduleId])
+
+  const isBusyInEditingRange = useMemo(() => {
+    if (!editingRange) return false
+    const externalBusy = parsedSchedules.some(
+      (slot) =>
+        slot.start.diff(editingRange.end, 'day') <= 0 &&
+        slot.end.diff(editingRange.start, 'day') >= 0
+    )
+    return externalBusy || hasInternalBusy
+  }, [editingRange, parsedSchedules, hasInternalBusy])
+
+  const scrollTimelineToActiveRange = useCallback(() => {
+    const el = timelineScrollRef.current
+    if (
+      !el ||
+      !editingRange ||
+      !axisStartDate ||
+      !axisEndDate ||
+      !timelineDays.length
+    )
+      return
+
+    if (
+      editingRange.end.isBefore(axisStartDate) ||
+      editingRange.start.isAfter(axisEndDate)
+    )
+      return
+
+    const displayStart = editingRange.start.isBefore(axisStartDate)
+      ? axisStartDate
+      : editingRange.start
+    const displayEnd = editingRange.end.isAfter(axisEndDate)
+      ? axisEndDate
+      : editingRange.end
+
+    const startOffset = displayStart.diff(axisStartDate, 'day')
+    const duration = displayEnd.diff(displayStart, 'day') + 1
+    const blockWidth = Math.max(duration, 1) * COL_WIDTH
+    const blockStart = startOffset * COL_WIDTH
+    const target = blockStart - (el.clientWidth - blockWidth) / 2
+
+    el.scrollLeft = Math.max(target, 0)
+  }, [editingRange, axisStartDate, axisEndDate, timelineDays.length])
+
+  return (
+    <div
+      className={cn(
+        'flex h-fit w-fit gap-2 rounded-full border-3 border-transparent px-2 py-1 shadow-none',
+        selected ? 'border-blue-500' : '',
+        isBusyInEditingRange ? 'bg-gray-200 text-gray-500' : 'bg-white'
+      )}
+    >
+      <HoverCard>
+        <HoverCardTrigger asChild>
+          <div
+            onClick={() => onSelect(item.id)}
+            className="flex cursor-pointer items-center gap-2"
+          >
+            <Avatar>
+              <AvatarImage
+                src={item.avatar || 'https://github.com/shadcn.png'}
+                alt="@shadcn"
+              />
+              <AvatarFallback>{item.name.slice(0, 1)}</AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col select-none">
+              <div className="text-sm font-medium">{item.name}</div>
+              <div className="text-xs text-gray-500">{item.phone}</div>
+            </div>
+          </div>
+        </HoverCardTrigger>
+        <HoverCardContent className="w-auto">
+          <div className="flex justify-between gap-4">
+            <Avatar>
+              <AvatarImage
+                src={item.avatar || 'https://github.com/shadcn.png'}
+                alt="@shadcn"
+              />
+              <AvatarFallback>{item.name.slice(0, 1)}</AvatarFallback>
+            </Avatar>
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">{item.name}</h4>
+              <p className="text-sm">{item.location}</p>
+              <p className="text-sm">{item.phone}</p>
+              <div className="text-muted-foreground text-xs">
+                {item.subject.join(', ')}
+              </div>
+            </div>
+          </div>
+        </HoverCardContent>
+      </HoverCard>
+      <Popover>
+        <PopoverTrigger asChild>
+          <div className="rounded-full bg-blue-50 p-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <ChartNoAxesGantt
+                  className="cursor-pointer"
+                  strokeWidth={3}
+                  size={20}
+                  color="oklch(55.1% 0.027 264.364)"
+                />
+              </TooltipTrigger>
+              <TooltipContent side="right">查看讲师排期</TooltipContent>
+            </Tooltip>
+          </div>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-[700px]"
+          onOpenAutoFocus={() =>
+            requestAnimationFrame(scrollTimelineToActiveRange)
+          }
+        >
+          <div className="h-18 w-full overflow-auto" ref={timelineScrollRef}>
+            <div
+              className="relative flex h-full flex-nowrap items-center"
+              style={{
+                minWidth: `${Math.max(timelineDays.length, 1) * COL_WIDTH}px`,
+              }}
+            >
+              {timelineDays.map((item) => (
+                <div
+                  key={`${item.year}-${item.month}-${item.day}`}
+                  className="relative mt-4 flex h-0.5 w-[100px] shrink-0 bg-black"
+                >
+                  <p className="absolute -top-8 text-xs whitespace-nowrap">{`${item.month}月${item.day}日·周${item.dayOfWeekName}`}</p>
+                </div>
+              ))}
+              {scheduleBlocks.map((block) => (
+                <div
+                  key={block.key}
+                  className={cn(
+                    'absolute top-5 flex h-8 items-center border border-blue-200 bg-blue-50 px-2 text-[10px] text-blue-900 shadow',
+                    block.clippedLeft ? 'rounded-l-none' : 'rounded-l-md',
+                    block.clippedRight ? 'rounded-r-none' : 'rounded-r-md'
+                  )}
+                  style={{ left: block.left, width: block.width }}
+                >
+                  {block.label}
+                </div>
+              ))}
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+})
 
 function App() {
   const contentRef = useRef<HTMLDivElement>(null)
@@ -200,18 +723,7 @@ function App() {
     left: number
     width: number
   }>({ visible: false, projectId: null, left: 0, width: 0 })
-  const [scheduleEdit, setScheduleEdit] = useState<{
-    visibleEntry: boolean
-    visibleEdit: boolean
-    scheduleId: string
-    subjectsId: string
-    teacherId: string
-    projectId: string
-    projectName: string
-    schoolName: string
-    startDate: string
-    endDate: string
-  }>({
+  const [scheduleEdit, setScheduleEdit] = useState<ScheduleEditState>({
     visibleEntry: false,
     visibleEdit: false,
     scheduleId: '',
@@ -222,7 +734,10 @@ function App() {
     schoolName: '',
     startDate: '',
     endDate: '',
+    startTimestamp: null,
+    endTimestamp: null,
   })
+  const scheduleEditRef = useRef<ScheduleEditState>(scheduleEdit)
   const [resizing, setResizing] = useState<{
     active: boolean
     side: 'left' | 'right' | null
@@ -235,8 +750,17 @@ function App() {
   const scheduleData = useSelector(
     (state: RootState) => state.editData.scheduleData
   )
-  const projectData = useSelector((state: RootState) => state.projects.projects)
-  const teacherData = useSelector((state: RootState) => state.teachers.teachers)
+  const projectData = useSelector(
+    (state: RootState) => state.projects.projects,
+    shallowEqual
+  )
+  const teacherData = useSelector(
+    (state: RootState) => state.teachers.teachers,
+    shallowEqual
+  )
+  const projectDataRef = useRef(projectData)
+  const scheduleDataRef = useRef(scheduleData)
+  const midDateRef = useRef<dateObj | null>(null)
 
   const [createProjectData, setCreateProjectData] = useState<{
     name: string
@@ -264,6 +788,18 @@ function App() {
   const [selectedSchool, setSelectedSchool] = useState<school[]>([])
 
   const [midDate, setMidDate] = useState<dateObj | null>(null)
+  useEffect(() => {
+    projectDataRef.current = projectData
+  }, [projectData])
+  useEffect(() => {
+    scheduleDataRef.current = scheduleData
+  }, [scheduleData])
+  useEffect(() => {
+    midDateRef.current = midDate
+  }, [midDate])
+  useEffect(() => {
+    scheduleEditRef.current = scheduleEdit
+  }, [scheduleEdit])
   const [renderSubject, setRenderSubject] = useState(subjects)
   const [selected, setSelected] = useState<Record<string, string>>({})
   const [teacherFilter, setTeacherFilter] = useState<'all' | 'subject'>(
@@ -381,6 +917,26 @@ function App() {
     }
     return false
   }
+  const hasTeacherExternalConflict = useCallback(
+    (teacherId: string, start: Date, end: Date) => {
+      const teacherExt = teacherSchedule.find(
+        (item) => item.teacherId === teacherId
+      )
+      if (!teacherExt) return false
+
+      const s = dayjs(start).startOf('day')
+      const e = dayjs(end).startOf('day')
+      if (!s.isValid() || !e.isValid()) return false
+
+      return teacherExt.schedule.some(({ start, end }) => {
+        const extStart = dayjs(start, 'YYYY.MM.DD').startOf('day')
+        const extEnd = dayjs(end, 'YYYY.MM.DD').startOf('day')
+        if (!extStart.isValid() || !extEnd.isValid()) return false
+        return extStart.diff(e, 'day') <= 0 && extEnd.diff(s, 'day') >= 0
+      })
+    },
+    []
+  )
   const measure = () => {
     const header = headerRef.current
     const toolbar = toolbarRef.current
@@ -421,7 +977,7 @@ function App() {
     })
   }
 
-  const resetProjectForm = () => {
+  const resetProjectForm = useCallback(() => {
     setCreateProjectData({
       name: '',
       schoolId: '',
@@ -429,12 +985,19 @@ function App() {
       description: '',
     })
     setEditingProjectId(null)
-  }
+  }, [])
 
   const handleProjectDialogChange = (open: boolean) => {
     setAddProjectOpen(open)
     if (!open) resetProjectForm()
   }
+
+  const handleDateRangeChange = useCallback((next: DateRangeValue) => {
+    const start = next?.start ?? null
+    const end = next?.end ?? null
+    setDays(getDaysInRange(start, end))
+    setDateRange({ start, end })
+  }, [])
 
   const handleCreateProject = () => {
     const projectId = editingProjectId ?? randomString(16)
@@ -835,37 +1398,65 @@ function App() {
     })
   }
 
-  const handleScheduleSubjects = (checked: CheckedState, id: string) => {
-    if (!scheduleEdit.visibleEdit) return
-    setScheduleEdit((prev) => ({
-      ...prev,
-      subjectsId: checked ? id : '',
-    }))
-    let schedule = scheduleData[scheduleEdit.projectId].find(
-      (item) => item.scheduleId === scheduleEdit.scheduleId
-    )
-    schedule = {
-      ...schedule!,
-      subjectsId: checked ? id : '',
-    }
-    dispatch(updateSchedule(schedule!))
-  }
+  const handleScheduleSubjects = useCallback(
+    (checked: CheckedState, id: string) => {
+      const currEdit = scheduleEditRef.current
+      if (!currEdit.visibleEdit) return
+      const nextSubjectsId = checked ? id : ''
+      const schedule = scheduleDataRef.current[currEdit.projectId]?.find(
+        (item) => item.scheduleId === currEdit.scheduleId
+      )
+      if (!schedule) return
+      if (schedule.subjectsId === nextSubjectsId) return
 
-  const handleScheduleTeacher = (id: string) => {
-    if (!scheduleEdit.visibleEdit) return
-    setScheduleEdit((prev) => ({
-      ...prev,
-      teacherId: id,
-    }))
-    let schedule = scheduleData[scheduleEdit.projectId].find(
-      (item) => item.scheduleId === scheduleEdit.scheduleId
-    )
-    schedule = {
-      ...schedule!,
-      teacherId: id,
-    }
-    dispatch(updateSchedule(schedule!))
-  }
+      setScheduleEdit((prev) => ({
+        ...prev,
+        subjectsId: nextSubjectsId,
+      }))
+
+      dispatch(
+        updateSchedule({
+          ...schedule,
+          subjectsId: nextSubjectsId,
+        })
+      )
+    },
+    [dispatch]
+  )
+
+  const handleScheduleTeacher = useCallback(
+    (id: string) => {
+      const currEdit = scheduleEditRef.current
+      if (!currEdit.visibleEdit) return
+      const schedule = scheduleDataRef.current[currEdit.projectId]?.find(
+        (item) => item.scheduleId === currEdit.scheduleId
+      )
+      if (!schedule) return
+      if (schedule.teacherId === id) return
+      const scheduleStart = new Date(schedule.startDate)
+      const scheduleEnd = new Date(schedule.endDate)
+      if (
+        hasTeacherExternalConflict(id, scheduleStart, scheduleEnd) ||
+        hasTeacherOverlap(id, scheduleStart, scheduleEnd, schedule.scheduleId)
+      ) {
+        toast.error('教师冲突', { description: '该讲师在所选日期已有其他安排' })
+        return
+      }
+
+      setScheduleEdit((prev) => ({
+        ...prev,
+        teacherId: id,
+      }))
+
+      dispatch(
+        updateSchedule({
+          ...schedule,
+          teacherId: id,
+        })
+      )
+    },
+    [dispatch, hasTeacherExternalConflict, hasTeacherOverlap]
+  )
 
   const handleSubjectSearch = () => {
     if (subjectSearch.text && subjectSearch.searched) {
@@ -1148,222 +1739,247 @@ function App() {
     prevCursorRef.current = editCursor
   }, [editCursor, editLog, dispatch])
 
-  const shiftSchedules = (
-    scope: 'before' | 'after',
-    direction: 'forward' | 'backward',
-    amount: number
-  ) => {
-    if (!midDate) {
-      toast.error('未获取锚点日期')
-      return
-    }
-    const anchor = new Date(midDate.year, midDate.month - 1, midDate.day)
-    const DAY_MS = 24 * 60 * 60 * 1000
-    const delta = (direction === 'forward' ? amount : -amount) * DAY_MS
-    const dayStart = new Date(
-      anchor.getFullYear(),
-      anchor.getMonth(),
-      anchor.getDate()
-    ).getTime()
-
-    type MoveCandidate = {
-      item: ScheduleItem
-      newStart: number
-      newEnd: number
-      conflictProject?: boolean
-      conflictTeacher?: boolean
-    }
-    //分离出候选项目
-    const candidates: MoveCandidate[] = []
-    const movedIds = new Set<string>()
-
-    projectData.forEach((proj) => {
-      const list = scheduleData[proj.id] || []
-      list.forEach((it) => {
-        const match =
-          scope === 'after' ? it.startDate >= dayStart : it.startDate < dayStart
-        if (match) {
-          const newStart = it.startDate + delta
-          const newEnd = it.endDate + delta
-          candidates.push({ item: it, newStart, newEnd })
-          movedIds.add(it.scheduleId)
-        }
-      })
-    })
-
-    if (candidates.length === 0) {
-      toast('无可调整的安排', {
-        description: '所选范围内没有可调整的课程',
-      })
-      return
-    }
-
-    const excludeIds = Array.from(movedIds)
-    const feasible: MoveCandidate[] = []
-    const conflicts: MoveCandidate[] = []
-
-    //第一轮冲突检测，检查可移动候选安排和不需要移动的安排是否有时间和教师冲突
-    for (const c of candidates) {
-      const { item, newStart, newEnd } = c
-      const others = (scheduleData[item.projectId] || []).filter(
-        (e) => !movedIds.has(e.scheduleId)
-      )
-      const conflictProject = others.some(
-        (e) => !(newEnd < e.startDate || newStart > e.endDate)
-      )
-      const conflictTeacher =
-        !!item.teacherId &&
-        hasTeacherOverlap(
-          item.teacherId,
-          new Date(newStart),
-          new Date(newEnd),
-          excludeIds
-        )
-
-      if (conflictProject || conflictTeacher) {
-        conflicts.push({ ...c, conflictProject, conflictTeacher })
-      } else {
-        feasible.push(c)
+  const shiftSchedules = useCallback(
+    (
+      scope: 'before' | 'after',
+      direction: 'forward' | 'backward',
+      amount: number
+    ) => {
+      const mid = midDateRef.current
+      const projectDataCurrent = projectDataRef.current
+      const scheduleDataCurrent = scheduleDataRef.current
+      if (!mid) {
+        toast.error('未获取锚点日期')
+        return
       }
-    }
-    // {
-    //   const byProject = new Map<string, MoveCandidate[]>()
-    //   feasible.forEach((c) => {
-    //     const key = c.item.projectId
-    //     const arr = byProject.get(key) || []
-    //     arr.push(c)
-    //     byProject.set(key, arr)
-    //   })
-    //   const conflictIds = new Set<string>()
-    //   byProject.forEach((list) => {
-    //     list.sort((a, b) => a.newStart - b.newStart)
-    //     for (let i = 1; i < list.length; i++) {
-    //       const prev = list[i - 1]
-    //       const cur = list[i]
-    //       if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
-    //         conflictIds.add(prev.item.scheduleId)
-    //         conflictIds.add(cur.item.scheduleId)
-    //       }
-    //     }
-    //   })
-    //   const byTeacher = new Map<string, MoveCandidate[]>()
-    //   feasible.forEach((c) => {
-    //     const t = c.item.teacherId
-    //     if (!t) return
-    //     const arr = byTeacher.get(t) || []
-    //     arr.push(c)
-    //     byTeacher.set(t, arr)
-    //   })
-    //   byTeacher.forEach((list) => {
-    //     list.sort((a, b) => a.newStart - b.newStart)
-    //     for (let i = 1; i < list.length; i++) {
-    //       const prev = list[i - 1]
-    //       const cur = list[i]
-    //       if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
-    //         conflictIds.add(prev.item.scheduleId)
-    //         conflictIds.add(cur.item.scheduleId)
-    //       }
-    //     }
-    //   })
-    //   if (conflictIds.size > 0) {
-    //     const stillFeasible: MoveCandidate[] = []
-    //     const newlyConflicted: MoveCandidate[] = []
-    //     feasible.forEach((c) => {
-    //       if (conflictIds.has(c.item.scheduleId)) {
-    //         newlyConflicted.push({ ...c, conflictProject: true })
-    //       } else {
-    //         stillFeasible.push(c)
-    //       }
-    //     })
-    //     feasible.length = 0
-    //     feasible.push(...stillFeasible)
-    //     conflicts.push(...newlyConflicted)
-    //   }
-    //   const conflictsByProject = new Map<
-    //     string,
-    //     { start: number; end: number }[]
-    //   >()
-    //   conflicts.forEach((c) => {
-    //     const key = c.item.projectId
-    //     const arr = conflictsByProject.get(key) || []
-    //     arr.push({ start: c.item.startDate, end: c.item.endDate })
-    //     conflictsByProject.set(key, arr)
-    //   })
-    //   const conflictsByTeacher = new Map<
-    //     string,
-    //     { start: number; end: number }[]
-    //   >()
-    //   conflicts.forEach((c) => {
-    //     const t = c.item.teacherId
-    //     if (!t) return
-    //     const arr = conflictsByTeacher.get(t) || []
-    //     arr.push({ start: c.item.startDate, end: c.item.endDate })
-    //     conflictsByTeacher.set(t, arr)
-    //   })
+      const anchor = new Date(mid.year, mid.month - 1, mid.day)
+      const DAY_MS = 24 * 60 * 60 * 1000
+      const delta = (direction === 'forward' ? amount : -amount) * DAY_MS
+      const dayStart = new Date(
+        anchor.getFullYear(),
+        anchor.getMonth(),
+        anchor.getDate()
+      ).getTime()
 
-    //   const conflictIds2 = new Set<string>()
-    //   feasible.forEach((c) => {
-    //     const projRanges = conflictsByProject.get(c.item.projectId) || []
-    //     if (
-    //       projRanges.some((e) => !(c.newEnd < e.start || c.newStart > e.end))
-    //     ) {
-    //       conflictIds2.add(c.item.scheduleId)
-    //       return
-    //     }
-    //     const t = c.item.teacherId
-    //     if (t) {
-    //       const teacherRanges = conflictsByTeacher.get(t) || []
-    //       if (
-    //         teacherRanges.some(
-    //           (e) => !(c.newEnd < e.start || c.newStart > e.end)
-    //         )
-    //       ) {
-    //         conflictIds2.add(c.item.scheduleId)
-    //       }
-    //     }
-    //   })
-    //   if (conflictIds2.size > 0) {
-    //     const stillFeasible: MoveCandidate[] = []
-    //     const newlyConflicted: MoveCandidate[] = []
-    //     feasible.forEach((c) => {
-    //       if (conflictIds2.has(c.item.scheduleId)) {
-    //         newlyConflicted.push({ ...c, conflictProject: true })
-    //       } else {
-    //         stillFeasible.push(c)
-    //       }
-    //     })
-    //     feasible.length = 0
-    //     feasible.push(...stillFeasible)
-    //     conflicts.push(...newlyConflicted)
-    //   }
-    // }
+      type MoveCandidate = {
+        item: ScheduleItem
+        newStart: number
+        newEnd: number
+        conflictProject?: boolean
+        conflictTeacher?: boolean
+      }
+      //分离出候选项目
+      const candidates: MoveCandidate[] = []
+      const movedIds = new Set<string>()
 
-    if (conflicts.length > 0) {
-      toast.error('存在冲突安排', {
-        description: `请检查冲突安排`,
+      projectDataCurrent.forEach((proj) => {
+        const list = scheduleDataCurrent[proj.id] || []
+        list.forEach((it) => {
+          const match =
+            scope === 'after'
+              ? it.startDate >= dayStart
+              : it.startDate < dayStart
+          if (match) {
+            const newStart = it.startDate + delta
+            const newEnd = it.endDate + delta
+            candidates.push({ item: it, newStart, newEnd })
+            movedIds.add(it.scheduleId)
+          }
+        })
       })
+
+      if (candidates.length === 0) {
+        toast('无可调整的安排', {
+          description: '所选范围内没有可调整的课程',
+        })
+        return
+      }
+
+      const excludeIds = Array.from(movedIds)
+      const feasible: MoveCandidate[] = []
+      const conflicts: MoveCandidate[] = []
+
+      //第一轮冲突检测，检查可移动候选安排和不需要移动的安排是否有时间和教师冲突
+      for (const c of candidates) {
+        const { item, newStart, newEnd } = c
+        const others = (scheduleData[item.projectId] || []).filter(
+          (e) => !movedIds.has(e.scheduleId)
+        )
+        const conflictProject = others.some(
+          (e) => !(newEnd < e.startDate || newStart > e.endDate)
+        )
+        const conflictTeacher =
+          !!item.teacherId &&
+          hasTeacherOverlap(
+            item.teacherId,
+            new Date(newStart),
+            new Date(newEnd),
+            excludeIds
+          )
+
+        if (conflictProject || conflictTeacher) {
+          conflicts.push({ ...c, conflictProject, conflictTeacher })
+        } else {
+          feasible.push(c)
+        }
+      }
+      // {
+      //   const byProject = new Map<string, MoveCandidate[]>()
+      //   feasible.forEach((c) => {
+      //     const key = c.item.projectId
+      //     const arr = byProject.get(key) || []
+      //     arr.push(c)
+      //     byProject.set(key, arr)
+      //   })
+      //   const conflictIds = new Set<string>()
+      //   byProject.forEach((list) => {
+      //     list.sort((a, b) => a.newStart - b.newStart)
+      //     for (let i = 1; i < list.length; i++) {
+      //       const prev = list[i - 1]
+      //       const cur = list[i]
+      //       if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
+      //         conflictIds.add(prev.item.scheduleId)
+      //         conflictIds.add(cur.item.scheduleId)
+      //       }
+      //     }
+      //   })
+      //   const byTeacher = new Map<string, MoveCandidate[]>()
+      //   feasible.forEach((c) => {
+      //     const t = c.item.teacherId
+      //     if (!t) return
+      //     const arr = byTeacher.get(t) || []
+      //     arr.push(c)
+      //     byTeacher.set(t, arr)
+      //   })
+      //   byTeacher.forEach((list) => {
+      //     list.sort((a, b) => a.newStart - b.newStart)
+      //     for (let i = 1; i < list.length; i++) {
+      //       const prev = list[i - 1]
+      //       const cur = list[i]
+      //       if (!(cur.newStart > prev.newEnd || cur.newEnd < prev.newStart)) {
+      //         conflictIds.add(prev.item.scheduleId)
+      //         conflictIds.add(cur.item.scheduleId)
+      //       }
+      //     }
+      //   })
+      //   if (conflictIds.size > 0) {
+      //     const stillFeasible: MoveCandidate[] = []
+      //     const newlyConflicted: MoveCandidate[] = []
+      //     feasible.forEach((c) => {
+      //       if (conflictIds.has(c.item.scheduleId)) {
+      //         newlyConflicted.push({ ...c, conflictProject: true })
+      //       } else {
+      //         stillFeasible.push(c)
+      //       }
+      //     })
+      //     feasible.length = 0
+      //     feasible.push(...stillFeasible)
+      //     conflicts.push(...newlyConflicted)
+      //   }
+      //   const conflictsByProject = new Map<
+      //     string,
+      //     { start: number; end: number }[]
+      //   >()
+      //   conflicts.forEach((c) => {
+      //     const key = c.item.projectId
+      //     const arr = conflictsByProject.get(key) || []
+      //     arr.push({ start: c.item.startDate, end: c.item.endDate })
+      //     conflictsByProject.set(key, arr)
+      //   })
+      //   const conflictsByTeacher = new Map<
+      //     string,
+      //     { start: number; end: number }[]
+      //   >()
+      //   conflicts.forEach((c) => {
+      //     const t = c.item.teacherId
+      //     if (!t) return
+      //     const arr = conflictsByTeacher.get(t) || []
+      //     arr.push({ start: c.item.startDate, end: c.item.endDate })
+      //     conflictsByTeacher.set(t, arr)
+      //   })
+
+      //   const conflictIds2 = new Set<string>()
+      //   feasible.forEach((c) => {
+      //     const projRanges = conflictsByProject.get(c.item.projectId) || []
+      //     if (
+      //       projRanges.some((e) => !(c.newEnd < e.start || c.newStart > e.end))
+      //     ) {
+      //       conflictIds2.add(c.item.scheduleId)
+      //       return
+      //     }
+      //     const t = c.item.teacherId
+      //     if (t) {
+      //       const teacherRanges = conflictsByTeacher.get(t) || []
+      //       if (
+      //         teacherRanges.some(
+      //           (e) => !(c.newEnd < e.start || c.newStart > e.end)
+      //         )
+      //       ) {
+      //         conflictIds2.add(c.item.scheduleId)
+      //       }
+      //     }
+      //   })
+      //   if (conflictIds2.size > 0) {
+      //     const stillFeasible: MoveCandidate[] = []
+      //     const newlyConflicted: MoveCandidate[] = []
+      //     feasible.forEach((c) => {
+      //       if (conflictIds2.has(c.item.scheduleId)) {
+      //         newlyConflicted.push({ ...c, conflictProject: true })
+      //       } else {
+      //         stillFeasible.push(c)
+      //       }
+      //     })
+      //     feasible.length = 0
+      //     feasible.push(...stillFeasible)
+      //     conflicts.push(...newlyConflicted)
+      //   }
+      // }
+
+      if (conflicts.length > 0) {
+        toast.error('存在冲突安排', {
+          description: `请检查冲突安排`,
+        })
+        return
+      }
+
+      feasible.forEach(({ item, newStart, newEnd }) => {
+        dispatch(
+          updateSchedule({
+            projectId: item.projectId,
+            startDate: new Date(newStart),
+            endDate: new Date(newEnd),
+            description: item.description,
+            teacherId: item.teacherId,
+            area: item.area,
+            subjectsId: item.subjectsId,
+            scheduleId: item.scheduleId,
+          })
+        )
+      })
+
+      toast.success('批量调整完成', {
+        description: `已调整 ${feasible.length} 条安排`,
+      })
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dispatch]
+  )
+
+  const handleAddCourse = useCallback(() => {
+    if (selectedSchool.length <= 0) {
+      toast.error('请先选择校区')
       return
     }
+    resetProjectForm()
+    setAddProjectOpen(true)
+  }, [selectedSchool.length, resetProjectForm])
 
-    feasible.forEach(({ item, newStart, newEnd }) => {
-      dispatch(
-        updateSchedule({
-          projectId: item.projectId,
-          startDate: new Date(newStart),
-          endDate: new Date(newEnd),
-          description: item.description,
-          teacherId: item.teacherId,
-          area: item.area,
-          subjectsId: item.subjectsId,
-          scheduleId: item.scheduleId,
-        })
-      )
-    })
-
-    toast.success('批量调整完成', {
-      description: `已调整 ${feasible.length} 条安排`,
-    })
-  }
+  const handleOpenDay = useCallback(
+    (day: dateObj | null) => {
+      setMidDate(day)
+    },
+    [setMidDate]
+  )
 
   return (
     <div
@@ -1388,16 +2004,7 @@ function App() {
             defaultValue={[]}
             onChange={handleSelectSchool}
           />
-          <DateRangePicker
-            value={dateRange}
-            onChange={(next) => {
-              setDays(getDaysInRange(next?.start ?? null, next?.end ?? null))
-              setDateRange({
-                start: next?.start ?? null,
-                end: next?.end ?? null,
-              })
-            }}
-          />
+          <DateRangePicker value={dateRange} onChange={handleDateRangeChange} />
           {/*<Button variant="outline" className="cursor-pointer">
             <RotateCw />
             初始化编辑器
@@ -1421,141 +2028,22 @@ function App() {
               )}
             >
               <div className="relative overflow-auto border-r border-gray-300">
-                <div
-                  className={cn(
-                    'sticky top-0 left-0 flex w-full items-center gap-2 overflow-hidden rounded-tl-md border-gray-300 bg-white/70 px-2 text-gray-700 backdrop-blur-md transition-all',
-                    scheduleEdit.visibleEdit
-                      ? 'h-10 border-b'
-                      : 'h-0 border-none'
-                  )}
-                >
-                  <TableProperties size={20} />
-                  {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排科目`}
-                </div>
-                <FieldGroup className="flex flex-row flex-wrap gap-2 p-2 [--radius:9999rem]">
-                  {renderSubject.map((option) => (
-                    <FieldLabel
-                      htmlFor={option.id}
-                      key={option.id}
-                      className="w-fit! bg-white"
-                    >
-                      <Field
-                        orientation="horizontal"
-                        className="cursor-pointer gap-1.5 overflow-hidden px-3! py-1.5! transition-all duration-100 ease-linear group-has-data-[state=checked]/field-label:px-2!"
-                      >
-                        <Checkbox
-                          value={option.id}
-                          id={option.id}
-                          onCheckedChange={(checked) =>
-                            handleScheduleSubjects(checked, option.id)
-                          }
-                          checked={scheduleEdit.subjectsId === option.id}
-                          className="-ml-6 -translate-x-1 rounded-full bg-white transition-all duration-100 ease-linear data-[state=checked]:ml-0 data-[state=checked]:translate-x-0"
-                        />
-                        <FieldTitle>{option.name}</FieldTitle>
-                      </Field>
-                    </FieldLabel>
-                  ))}
-                </FieldGroup>
+                <SubjectSelector
+                  renderSubject={renderSubject}
+                  scheduleEdit={scheduleEdit}
+                  onSelect={handleScheduleSubjects}
+                />
               </div>
               <div className="relative overflow-auto">
-                <div
-                  className={cn(
-                    'sticky top-0 left-0 z-30 flex w-full items-center gap-2 overflow-hidden rounded-tr-md border-gray-300 bg-white/70 px-2 text-gray-700 backdrop-blur-md transition-all',
-                    scheduleEdit.visibleEdit
-                      ? 'h-10 border-b'
-                      : 'h-0 border-none'
-                  )}
-                >
-                  <User size={20} />
-                  {`请选择（${scheduleEdit.schoolName}）${scheduleEdit.projectName} ${scheduleEdit.startDate} 至 ${scheduleEdit.endDate}安排上课讲师`}
-                </div>
-
-                <div className="flex flex-wrap content-start items-start gap-2 p-2 pb-20">
-                  {teacherData.map((item) => (
-                    <HoverCard key={item.id}>
-                      <HoverCardTrigger asChild>
-                        <div
-                          key={item.id}
-                          onClick={() => handleScheduleTeacher(item.id)}
-                          className={cn(
-                            'flex h-fit w-fit cursor-pointer items-center gap-2 rounded-full border-3 border-transparent bg-white px-2 py-1 drop-shadow',
-                            item.id === scheduleEdit.teacherId
-                              ? 'border-blue-500'
-                              : ''
-                          )}
-                        >
-                          <Avatar>
-                            <AvatarImage
-                              src={
-                                item.avatar || 'https://github.com/shadcn.png'
-                              }
-                              alt="@shadcn"
-                            />
-                            <AvatarFallback>
-                              {item.name.slice(0, 1)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex flex-col select-none">
-                            <div className="text-sm font-medium">
-                              {item.name}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {item.phone}
-                            </div>
-                          </div>
-                          <div
-                            className="rounded-full bg-blue-50 p-2"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              console.log('helloo')
-                            }}
-                          >
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <ChartNoAxesGantt
-                                  strokeWidth={3}
-                                  size={20}
-                                  color="oklch(55.1% 0.027 264.364)"
-                                />
-                              </TooltipTrigger>
-                              <TooltipContent side="right">
-                                查看讲师排期
-                              </TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </div>
-                      </HoverCardTrigger>
-                      <HoverCardContent className="w-auto">
-                        <div className="flex justify-between gap-4">
-                          <Avatar>
-                            <AvatarImage
-                              src={
-                                item.avatar || 'https://github.com/shadcn.png'
-                              }
-                              alt="@shadcn"
-                            />
-                            <AvatarFallback>
-                              {item.name.slice(0, 1)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="space-y-1">
-                            <h4 className="text-sm font-semibold">
-                              {item.name}
-                            </h4>
-                            <p className="text-sm">{item.location}</p>
-                            <p className="text-sm">{item.phone}</p>
-                            <div className="text-muted-foreground text-xs">
-                              {item.subject.join(', ')}
-                            </div>
-                          </div>
-                        </div>
-                      </HoverCardContent>
-                    </HoverCard>
-                  ))}
-                </div>
+                <TeacherSelector
+                  teacherData={teacherData}
+                  scheduleEdit={scheduleEdit}
+                  onSelect={handleScheduleTeacher}
+                  dateRange={dateRange}
+                  scheduleData={scheduleData}
+                />
               </div>
-              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white/70 shadow-md backdrop-blur-md">
+              <div className="absolute right-1/2 bottom-4 w-60 -translate-x-4 rounded-md bg-white shadow-md">
                 <InputGroup>
                   <InputGroupInput
                     value={subjectSearch.text}
@@ -1589,7 +2077,7 @@ function App() {
                   </InputGroupAddon>
                 </InputGroup>
               </div>
-              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white/70 shadow-md backdrop-blur-md">
+              <div className="absolute right-0 bottom-4 flex -translate-x-4 items-center gap-2 rounded-md bg-white shadow-md">
                 <div className="flex items-center justify-center space-x-2 pl-2">
                   <Label className="mr-0 w-12" htmlFor="airplane-mode">
                     按科目
@@ -1715,128 +2203,14 @@ function App() {
                 className={cn('relative overflow-hidden')}
                 style={{ width: 'calc(100% - 4rem)' }}
               >
-                <div
-                  id="time-bar"
+                <TimeBar
                   ref={timeBarRef}
-                  className={cn(
-                    'absolute top-0 left-0 grid h-8 border-b border-gray-200'
-                  )}
-                  style={{
-                    gridTemplateColumns: `repeat(${countDaysInclusive(dateRange.start, dateRange.end) + 1}, 100px)`,
-                  }}
-                >
-                  {Array.from({
-                    length:
-                      countDaysInclusive(dateRange.start, dateRange.end) + 1,
-                  }).map((_, index) => {
-                    if (index <= 0) {
-                      return (
-                        <div
-                          key={0}
-                          className="flex cursor-pointer items-center justify-center gap-1 text-sm hover:bg-gray-200"
-                          onClick={() => {
-                            if (selectedSchool.length <= 0) {
-                              toast.error('请先选择校区')
-                              return
-                            }
-                            resetProjectForm()
-                            setAddProjectOpen(true)
-                          }}
-                        >
-                          <Plus size={16} />
-                          新增课程
-                        </div>
-                      )
-                    }
-                    return (
-                      <DropdownMenu
-                        key={index}
-                        onOpenChange={(e) => {
-                          if (e) setMidDate(days[index - 1])
-                          else setMidDate(null)
-                        }}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <div
-                            key={index}
-                            className={cn(
-                              'box-border flex cursor-pointer items-end pl-2 text-xs text-gray-400 transition-all hover:text-black',
-                              index > 0 ? 'border-l' : ''
-                            )}
-                          >
-                            {index > 0 && days.length > 0 && (
-                              <div className="flex flex-col leading-tight">
-                                <span>
-                                  {days[index - 1]?.month +
-                                    '月' +
-                                    days[index - 1]?.day +
-                                    '日'}
-                                </span>
-                                <span className="text-[10px]">
-                                  {'周' +
-                                    '日一二三四五六'[
-                                      new Date(
-                                        days[index - 1].year,
-                                        days[index - 1].month - 1,
-                                        days[index - 1].day
-                                      ).getDay()
-                                    ]}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-56" align="start">
-                          <DropdownMenuGroup>
-                            <DropdownMenuLabel>
-                              {days[index - 1]?.month +
-                                '月' +
-                                days[index - 1]?.day +
-                                '日'}
-                              之后课程安排
-                            </DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                shiftSchedules('after', 'forward', 1)
-                              }}
-                            >
-                              向后调整1天
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                shiftSchedules('after', 'backward', 1)
-                              }}
-                            >
-                              向前调整1天
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuLabel>
-                              {days[index - 1]?.month +
-                                '月' +
-                                days[index - 1]?.day +
-                                '日'}
-                              之前课程安排
-                            </DropdownMenuLabel>
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                shiftSchedules('before', 'forward', 1)
-                              }}
-                            >
-                              向后调整1天
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() => {
-                                shiftSchedules('before', 'backward', 1)
-                              }}
-                            >
-                              向前调整1天
-                            </DropdownMenuItem>
-                          </DropdownMenuGroup>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )
-                  })}
-                </div>
+                  days={days}
+                  dateRange={dateRange}
+                  onAddCourse={handleAddCourse}
+                  onOpenDay={handleOpenDay}
+                  onShift={shiftSchedules}
+                />
                 <div
                   id="schedule-classes"
                   ref={scheduleClassesRef}
@@ -1860,6 +2234,8 @@ function App() {
                           schoolName: '',
                           startDate: '',
                           endDate: '',
+                          startTimestamp: null,
+                          endTimestamp: null,
                         })
                       }}
                       className="absolute top-0 right-0 bottom-0 left-0 z-10 bg-black opacity-30"
@@ -1888,7 +2264,7 @@ function App() {
                             <button
                               type="button"
                               className={cn(
-                                'flex h-13 w-22 cursor-pointer flex-col rounded-md border-2 border-gray-50/50 bg-white/70 p-1 text-xs shadow-md backdrop-blur-md transition-all hover:shadow-xl focus:ring-2 focus:ring-blue-500 focus:outline-none'
+                                'flex h-13 w-22 cursor-pointer flex-col rounded-md border-2 border-gray-50/50 bg-white p-1 text-xs shadow-md transition-all hover:shadow-xl focus:ring-2 focus:ring-blue-500 focus:outline-none'
                               )}
                             >
                               <div className="mb-1 w-18 flex-nowrap truncate text-xs text-gray-500">
@@ -1925,22 +2301,20 @@ function App() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
-                      {getDaysInRange(dateRange.start, dateRange.end).map(
-                        (day, index) => (
-                          <div
-                            key={index}
-                            onMouseDownCapture={() => handleSelStart(day, item)}
-                            onMouseOverCapture={() => handleSelMove(day)}
-                            onMouseUpCapture={() => handleSelEnd()}
-                            className={cn(
-                              'h-full w-full cursor-cell',
-                              preview.visible
-                                ? ''
-                                : 'hover:rounded-md hover:border-2 hover:border-dashed hover:border-blue-400'
-                            )}
-                          ></div>
-                        )
-                      )}
+                      {days.map((day, index) => (
+                        <div
+                          key={index}
+                          onMouseDownCapture={() => handleSelStart(day, item)}
+                          onMouseOverCapture={() => handleSelMove(day)}
+                          onMouseUpCapture={() => handleSelEnd()}
+                          className={cn(
+                            'h-full w-full cursor-cell',
+                            preview.visible
+                              ? ''
+                              : 'hover:rounded-md hover:border-2 hover:border-dashed hover:border-blue-400'
+                          )}
+                        ></div>
+                      ))}
                       {selRange &&
                         selRange.visible &&
                         selRange.projectId === item.id && (
@@ -2021,6 +2395,8 @@ function App() {
                                     schoolName: '',
                                     startDate: '',
                                     endDate: '',
+                                    startTimestamp: null,
+                                    endTimestamp: null,
                                   })
                                 }
                               }}
@@ -2037,6 +2413,8 @@ function App() {
                                     schoolName: '',
                                     startDate: '',
                                     endDate: '',
+                                    startTimestamp: null,
+                                    endTimestamp: null,
                                   })
                                 }
                               }}
@@ -2132,6 +2510,8 @@ function App() {
                                           endDate: dayjs(
                                             schedule.endDate
                                           ).format('MM-DD'),
+                                          startTimestamp: schedule.startDate,
+                                          endTimestamp: schedule.endDate,
                                         })
                                       }}
                                       size="sm"
